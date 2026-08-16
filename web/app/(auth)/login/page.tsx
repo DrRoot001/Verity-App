@@ -54,12 +54,23 @@ export default function LoginPage() {
   }
 
   return (
-    <main id="main" className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <div className="mb-8 space-y-1">
-        <p className="text-xl font-semibold tracking-tight text-[var(--color-accent)]">Verity</p>
-        <p className="text-[var(--color-text-secondary)]">
-          One workspace per opportunity. Enter your context once.
-        </p>
+    <main id="main" className="mx-auto flex min-h-screen max-w-[26rem] flex-col justify-center px-6">
+      <div className="mb-8 space-y-3">
+        <span
+          aria-hidden="true"
+          className="grid size-9 place-items-center rounded-[10px] bg-[var(--color-accent)] text-sm font-bold text-[var(--color-accent-contrast)] shadow-[var(--shadow-2)]"
+        >
+          V
+        </span>
+        <div className="space-y-1.5">
+          <h1 className="text-2xl">
+            {mode === "signin" ? "Welcome back" : "Create your workspace"}
+          </h1>
+          <p className="text-[var(--color-text-secondary)]">
+            One workspace per opportunity. Enter your context once, and every part of your
+            preparation draws on it.
+          </p>
+        </div>
       </div>
 
       <Card>
@@ -78,7 +89,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={Boolean(fieldErrors.email)}
                 aria-describedby={fieldErrors.email ? "email-error" : undefined}
-                className="h-9 w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3"
+                className="field"
               />
               {fieldErrors.email ? (
                 <p id="email-error" className="text-xs text-[var(--color-critical)]">
@@ -100,7 +111,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={Boolean(fieldErrors.password)}
                 aria-describedby={fieldErrors.password ? "password-error" : "password-hint"}
-                className="h-9 w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3"
+                className="field"
               />
               {fieldErrors.password ? (
                 <p id="password-error" className="text-xs text-[var(--color-critical)]">
@@ -136,7 +147,7 @@ export default function LoginPage() {
               </div>
             ) : null}
 
-            <Button type="submit" size="lg" loading={busy}>
+            <Button type="submit" size="lg" loading={busy} fullWidth>
               {mode === "signin" ? "Sign in" : "Create account"}
             </Button>
           </form>

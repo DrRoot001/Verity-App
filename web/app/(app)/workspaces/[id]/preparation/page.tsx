@@ -13,7 +13,7 @@ import { use, useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Card, CardBody } from "@/components/ui/card";
 import { Empty, ErrorState, Loading } from "@/components/ui/states";
 import {
   generatePlan,
@@ -102,10 +102,10 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
   const done = plan.tasks.filter((t) => t.status === "done");
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Preparation</h1>
+          <h1 className="text-2xl">Preparation</h1>
           <p className="text-sm text-[var(--color-text-secondary)]">
             Round {plan.round_index} · plan v{plan.version}
           </p>
@@ -116,19 +116,24 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
       </header>
 
       <Card>
-        <CardHeader
-          title={`${Math.round(plan.readiness.score)}% ready`}
-          meta="How much of the identified preparation is done — not a prediction of the outcome."
-        />
         <CardBody>
-          <ul className="space-y-2">
+          <div className="flex flex-wrap items-baseline justify-between gap-3 pb-4">
+            <div className="flex items-baseline gap-3">
+              <span className="numeric text-3xl">{Math.round(plan.readiness.score)}%</span>
+              <span className="text-md text-[var(--color-text-secondary)]">ready</span>
+            </div>
+            <p className="max-w-sm text-xs text-[var(--color-text-muted)]">
+              How much of the identified preparation is done — not a prediction of the outcome.
+            </p>
+          </div>
+          <ul className="space-y-2.5 border-t border-[var(--color-border-subtle)] pt-4">
             {plan.readiness.drivers.map((driver) => (
               <li key={driver.factor} className="flex items-start justify-between gap-4 text-sm">
-                <div>
-                  <p className="font-medium">{driver.factor.replace(/_/g, " ")}</p>
+                <div className="min-w-0">
+                  <p className="font-medium capitalize">{driver.factor.replace(/_/g, " ")}</p>
                   <p className="text-xs text-[var(--color-text-muted)]">{driver.detail}</p>
                 </div>
-                <span className="shrink-0 text-xs text-[var(--color-text-secondary)]">
+                <span className="numeric shrink-0 text-xs text-[var(--color-text-secondary)]">
                   {Math.round(driver.value * 100)}% × {Math.round(driver.weight * 100)}%
                 </span>
               </li>
@@ -156,7 +161,7 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
                           <p className="text-sm text-[var(--color-text-secondary)]">{task.detail}</p>
                         ) : null}
                         <p className="text-xs text-[var(--color-text-muted)]">
-                          {task.estimated_minutes} min
+                          <span className="numeric">{task.estimated_minutes} min</span>
                           {task.scheduled_for ? ` · scheduled ${task.scheduled_for}` : ""}
                         </p>
                       </div>

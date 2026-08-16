@@ -9,7 +9,16 @@ import tseslint from "typescript-eslint";
  * framework checks.
  */
 export default tseslint.config(
-  { ignores: [".next/**", "node_modules/**", "next-env.d.ts", "*.config.mjs", "*.config.ts"] },
+  {
+    ignores: [
+      ".next/**",
+      ".next-build/**",
+      "node_modules/**",
+      "next-env.d.ts",
+      "*.config.mjs",
+      "*.config.ts",
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

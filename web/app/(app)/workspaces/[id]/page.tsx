@@ -60,9 +60,9 @@ export default function WorkspacePage({ params }: { params: Promise<{ id: string
   const { opportunity, candidate, match } = bundle;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{opportunity.role_title}</h1>
+        <h1 className="text-2xl">{opportunity.role_title}</h1>
         <p className="text-[var(--color-text-secondary)]">{opportunity.company_name}</p>
         <div className="flex flex-wrap gap-2">
           <Badge tone="neutral">{opportunity.stage.replace(/_/g, " ")}</Badge>

@@ -30,7 +30,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   if (!ready) {
     return (
-      <div role="status" aria-live="polite" className="p-8 text-[var(--color-text-secondary)]">
+      <div role="status" aria-live="polite" className="p-10 text-[var(--color-text-secondary)]">
         Checking your session…
       </div>
     );
@@ -38,10 +38,19 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]">
+      <header className="sticky top-0 z-20 border-b border-[var(--color-border-subtle)] bg-[var(--color-surface)]/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-6 px-6 py-3">
           <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="font-semibold tracking-tight text-[var(--color-accent)]">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-2 text-md font-semibold tracking-tight"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-6 place-items-center rounded-[6px] bg-[var(--color-accent)] text-[11px] font-bold text-[var(--color-accent-contrast)]"
+              >
+                V
+              </span>
               Verity
             </Link>
             <nav aria-label="Main">
@@ -53,10 +62,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                       <Link
                         href={item.href}
                         aria-current={active ? "page" : undefined}
-                        className={`rounded-[var(--radius-control)] px-3 py-1.5 text-sm ${
+                        className={`rounded-[var(--radius-control)] px-3 py-1.5 text-sm transition-colors duration-[var(--duration-micro)] ${
                           active
                             ? "bg-[var(--color-accent-quiet)] font-medium text-[var(--color-accent)]"
-                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-raised)]"
+                            : "text-[var(--color-text-secondary)] hover:bg-[var(--color-raised)] hover:text-[var(--color-text-primary)]"
                         }`}
                       >
                         {item.label}
@@ -68,7 +77,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </nav>
           </div>
           <div className="flex items-center gap-3 text-sm">
-            <span className="text-[var(--color-text-secondary)]">{email}</span>
+            <span className="hidden text-[var(--color-text-secondary)] sm:inline">{email}</span>
             <button
               type="button"
               onClick={() => {
@@ -82,7 +91,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main id="main" className="mx-auto max-w-6xl px-6 py-8">
+      <main id="main" className="mx-auto max-w-6xl px-6 py-10">
         {children}
       </main>
     </div>

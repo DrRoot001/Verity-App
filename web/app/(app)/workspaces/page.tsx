@@ -56,8 +56,8 @@ export default function WorkspacesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Workspaces</h1>
+    <div className="space-y-8">
+      <h1 className="text-2xl">Workspaces</h1>
 
       <Card>
         <CardHeader
@@ -76,7 +76,7 @@ export default function WorkspacesPage() {
                   required
                   value={company}
                   onChange={(e) => setCompany(e.target.value)}
-                  className="h-9 w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3"
+                  className="field"
                 />
               </div>
               <div className="space-y-1.5">
@@ -88,7 +88,7 @@ export default function WorkspacesPage() {
                   required
                   value={role}
                   onChange={(e) => setRole(e.target.value)}
-                  className="h-9 w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3"
+                  className="field"
                 />
               </div>
             </div>
@@ -104,7 +104,7 @@ export default function WorkspacesPage() {
                 onChange={(e) => setJd(e.target.value)}
                 aria-describedby="jd-hint"
                 placeholder="Paste the posting to get a requirement-by-requirement match."
-                className="w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-3 text-sm"
+                className="field text-sm"
               />
               <p id="jd-hint" className="text-xs text-[var(--color-text-muted)]">
                 Without a job description, Verity marks the opportunity as inferred rather than
@@ -136,7 +136,7 @@ export default function WorkspacesPage() {
         <ul className="grid gap-3 sm:grid-cols-2">
           {workspaces.map((w) => (
             <li key={w.id}>
-              <Card as="article">
+              <Card as="article" interactive>
                 <CardBody>
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-0.5">

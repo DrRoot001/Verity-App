@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardBody, CardHeader } from "@/components/ui/card";
+import { Card, CardBody, CardHeader, PageHeader } from "@/components/ui/card";
 import { Empty, ErrorState, Loading } from "@/components/ui/states";
 import { reviewQueue } from "@/features/graph/api";
 import { listWorkspaces } from "@/features/workspace/api";
@@ -56,8 +56,11 @@ export default function DashboardPage() {
     .sort((a, b) => (a.interview_at ?? "").localeCompare(b.interview_at ?? ""))[0];
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+    <div className="space-y-8">
+      <PageHeader
+        title="Dashboard"
+        description="What you're preparing for, and what to do next."
+      />
 
       {queue.pending_count > 0 ? (
         <Card>
@@ -109,7 +112,7 @@ export default function DashboardPage() {
           <ul className="grid gap-3 sm:grid-cols-2">
             {workspaces.map((w) => (
               <li key={w.id}>
-                <Card as="article">
+                <Card as="article" interactive>
                   <CardBody>
                     <div className="space-y-2">
                       <div className="flex items-start justify-between gap-3">

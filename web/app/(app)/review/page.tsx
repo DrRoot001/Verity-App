@@ -96,9 +96,9 @@ export default function ReviewPage() {
   const byType = groupByType(queue.pending);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Review your profile</h1>
+        <h1 className="text-2xl">Review your profile</h1>
         <p className="max-w-prose text-[var(--color-text-secondary)]">
           Nothing here is used in an interview until you confirm it. Approving a fact is what
           lets Verity cite it later.
@@ -126,7 +126,7 @@ export default function ReviewPage() {
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="Paste the full text of your resume here."
-                className="w-full rounded-[var(--radius-control)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-3 font-[var(--font-mono)] text-sm"
+                className="field font-[var(--font-mono)] text-sm"
               />
               {error ? (
                 <p role="alert" className="text-sm text-[var(--color-critical)]">
