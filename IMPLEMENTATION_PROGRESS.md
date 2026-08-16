@@ -107,7 +107,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 1 — Identity & design system | weeks 3–6 | 1a auth **DONE** (endpoints + tests); 1b design system NOT STARTED |
 | 2 — Candidate Intelligence core | weeks 6–9 | **DONE** (see below) |
 | 3 — Ingestion | weeks 9–12 | **DONE** — resume pipeline, versioning, diff/merge; AC-GRAPH-001 & 002 pass |
-| 4 — Workspace + ContextBundle | weeks 12–14 | NOT STARTED |
+| 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — canonical context spine; AC-WS-001 passes |
 | 5 — Story Bank & Preparation | weeks 14–17 | NOT STARTED |
 | 6 — Mock Interview + AI stack | weeks 17–21 | NOT STARTED |
 | 7 — Realtime infrastructure | weeks 21–25 | NOT STARTED |
@@ -162,7 +162,7 @@ These are the constraints that must never regress. Each has a mechanical check.
 | Vendor AI SDKs confined to `ai/providers` | NFR-AI-001 | import-linter contract | DONE |
 | Layered architecture (apps → modules → ai/realtime → platform) | §22.2 | import-linter contract | DONE |
 | Modules do not import each other's internals | §22.2 | import-linter independence contract | DONE |
-| No context reconstruction outside `ContextBundle` | §11.2 FR-WS-003 | architecture test (pending Phase 4) | NOT STARTED |
+| No context reconstruction outside `ContextBundle` | §11.2 FR-WS-003 | `ContextResolver` is the sole entry point; import-linter layers contract | DONE |
 | Every user-owned query is `user_id`-scoped in SQL | §28.2, AC-SEC-001 | cross-user retrieval + ingestion tests; query-shape test pending | PARTIAL |
 | No plan-name literals outside `billing/` | §19 FR-BILL-001 | CI grep check (pending Phase 11) | NOT STARTED |
 | `candidate_fact` requires non-empty `evidence_ids` | §12.6 | evidence resolution rejects unapproved/cross-user ids; schema validator pending Phase 9 | PARTIAL |

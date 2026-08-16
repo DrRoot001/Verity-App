@@ -144,6 +144,7 @@ exhaustive = false
 name = "Feature modules sit above Candidate Intelligence"
 type = "layers"
 layers = [
+    "verity.modules.workspace",
     "verity.modules.documents",
     "verity.modules.candidate_graph",
 ]
@@ -157,5 +158,4 @@ type = "independence"
 modules = [
     "verity.modules.identity",
     "verity.modules.health",
-    "verity.modules.documents",
 ]
