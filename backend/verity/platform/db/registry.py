@@ -11,7 +11,11 @@ from __future__ import annotations
 import importlib
 
 # Model modules, in dependency order. Extended as each phase lands.
-MODEL_MODULES: tuple[str, ...] = ("verity.modules.identity.models",)
+MODEL_MODULES: tuple[str, ...] = (
+    "verity.modules.identity.models",
+    "verity.modules.candidate_graph.models",
+    "verity.modules.candidate_graph.embeddings",
+)
 
 
 def import_all_models() -> None:

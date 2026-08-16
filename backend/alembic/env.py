@@ -41,6 +41,22 @@ def _include_object(
     return not is_managed_partition
 
 
+def _render_item(type_: str, obj: object, autogen_context: object) -> str | bool:
+    """Teach autogenerate to emit pgvector types with their import.
+
+    Without this, a generated migration references ``pgvector.sqlalchemy`` but
+    never imports it, and the migration fails at run time rather than at review.
+    """
+    from pgvector.sqlalchemy import Vector
+
+    if type_ == "type" and isinstance(obj, Vector):
+        imports = getattr(autogen_context, "imports", None)
+        if imports is not None:
+            imports.add("import pgvector.sqlalchemy")
+        return f"pgvector.sqlalchemy.Vector(dim={obj.dim})"
+    return False
+
+
 def run_migrations_offline() -> None:
     context.configure(
         url=settings.database_url_sync,
@@ -50,6 +66,7 @@ def run_migrations_offline() -> None:
         compare_type=True,
         compare_server_default=True,
         include_object=_include_object,
+        render_item=_render_item,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -68,6 +85,7 @@ def run_migrations_online() -> None:
             compare_type=True,
             compare_server_default=True,
             include_object=_include_object,
+            render_item=_render_item,
         )
         with context.begin_transaction():
             context.run_migrations()

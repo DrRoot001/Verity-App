@@ -134,4 +134,5 @@ type = "independence"
 modules = [
     "verity.modules.identity",
     "verity.modules.health",
+    "verity.modules.candidate_graph",
 ]
