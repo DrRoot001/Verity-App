@@ -71,8 +71,15 @@ def dummy_verify() -> None:
 
     Without this, a missing account returns measurably faster than a wrong
     password, which is a free account-enumeration oracle (PRD §28.3).
+
+    The mismatch is expected and must be swallowed: letting it propagate turns
+    an unknown account into a 500 while a wrong password returns 401, which is
+    a sharper oracle than the timing difference this exists to hide.
     """
-    _hasher.verify(_DUMMY_HASH, "not-the-password")
+    try:
+        _hasher.verify(_DUMMY_HASH, "not-the-password")
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return
 
 
 _DUMMY_HASH: Final = _hasher.hash("verity-timing-equalizer")

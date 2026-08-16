@@ -69,6 +69,10 @@ ignore = [
 # auth-provider identifiers, not credentials.
 "verity/platform/errors.py" = ["S105"]
 "verity/modules/identity/models.py" = ["S105"]
+# S105 flags enum names and schema fields containing TOKEN/PASSWORD; these are
+# scope identifiers and an OAuth token_type literal, not credentials.
+"verity/platform/ratelimit.py" = ["S105"]
+"verity/modules/identity/schemas.py" = ["S105"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
