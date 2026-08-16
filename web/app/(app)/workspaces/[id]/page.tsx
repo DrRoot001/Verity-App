@@ -12,6 +12,7 @@
 import { use, useCallback, useEffect, useState } from "react";
 
 import { Badge, EvidenceChip } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Empty, ErrorState, Loading, Partial } from "@/components/ui/states";
 import { getContext } from "@/features/workspace/api";
@@ -70,6 +71,11 @@ export default function WorkspacePage({ params }: { params: Promise<{ id: string
             {opportunity.jd_present ? "job description attached" : "no job description"}
           </Badge>
           <Badge tone="neutral">{`context v${bundle.version}`}</Badge>
+        </div>
+        <div className="pt-1">
+          <Button size="sm" href={`/workspaces/${bundle.workspace_id}/preparation`}>
+            Preparation plan
+          </Button>
         </div>
       </header>
 

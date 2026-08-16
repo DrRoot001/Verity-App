@@ -88,16 +88,31 @@ export function Empty(props: StateProps) {
 /**
  * Errors always carry the backend's recovery action and a copyable request id,
  * so support can find the trace (FR-ERR-001).
+ *
+ * When an ApiError is passed, its own recovery_action wins over any default the
+ * caller supplied — the server knows whether the fix is "retry", "verify your
+ * email" or "upgrade", and a page-level guess would override the truth.
  */
 export function ErrorState({
   title,
   description,
   action,
   requestId,
-}: StateProps & { requestId?: string | null }) {
+  recovery,
+}: StateProps & {
+  requestId?: string | null;
+  recovery?: { type: string; target?: string | null; label?: string | null };
+}) {
+  const resolved = recovery ? recoveryToAction(recovery) ?? action : action;
   return (
     <div className="space-y-2">
-      <StateShell title={title} description={description} action={action} tone="critical" icon="⚠" />
+      <StateShell
+        title={title}
+        description={description}
+        action={resolved}
+        tone="critical"
+        icon="⚠"
+      />
       {requestId ? (
         <p className="text-xs text-[var(--color-text-muted)]">
           Reference: <code className="font-[var(--font-mono)]">{requestId}</code>
@@ -105,6 +120,26 @@ export function ErrorState({
       ) : null}
     </div>
   );
+}
+
+function recoveryToAction(recovery: {
+  type: string;
+  target?: string | null;
+  label?: string | null;
+}): StateProps["action"] {
+  const labels: Record<string, string> = {
+    verify_email: "Resend verification",
+    reauthenticate: "Sign in again",
+    upgrade: "See plans",
+    edit_input: "Review your input",
+    contact_support: "Contact support",
+    grant_permission: "Open settings",
+    reconnect: "Reconnect",
+  };
+  if (recovery.type === "none") return undefined;
+  const label = recovery.label ?? labels[recovery.type];
+  if (!label) return undefined;
+  return recovery.target ? { label, href: recovery.target } : { label };
 }
 
 /** Some sub-resources failed; the rest still renders (PRD §10.1 `partial`). */

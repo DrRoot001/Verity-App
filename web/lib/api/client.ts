@@ -50,11 +50,32 @@ export class NetworkError extends Error {
 }
 
 type TokenReader = () => string | null;
+type TokenRefresher = () => Promise<boolean>;
 
 let readAccessToken: TokenReader = () => null;
+let refreshTokens: TokenRefresher = async () => false;
 
 export function setTokenReader(reader: TokenReader): void {
   readAccessToken = reader;
+}
+
+/**
+ * Register the refresh strategy. Access tokens last 15 minutes by design
+ * (PRD §10.2); without this the user would be signed out mid-task on a
+ * timer, which is a worse failure than the short TTL prevents.
+ */
+export function setTokenRefresher(refresher: TokenRefresher): void {
+  refreshTokens = refresher;
+}
+
+/** Concurrent 401s share one refresh rather than each starting their own. */
+let inFlightRefresh: Promise<boolean> | null = null;
+
+async function refreshOnce(): Promise<boolean> {
+  inFlightRefresh ??= refreshTokens().finally(() => {
+    inFlightRefresh = null;
+  });
+  return inFlightRefresh;
 }
 
 interface RequestOptions {
@@ -65,7 +86,11 @@ interface RequestOptions {
   idempotencyKey?: string;
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+  { allowRefresh = true }: { allowRefresh?: boolean } = {},
+): Promise<T> {
   const { method = "GET", body, signal, idempotencyKey } = options;
 
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -95,7 +120,15 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   const payload: unknown = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    if (isErrorEnvelope(payload)) throw new ApiError(response.status, payload);
+    if (isErrorEnvelope(payload)) {
+      const error = new ApiError(response.status, payload);
+      // An expired access token is recoverable without user action; a revoked
+      // session or a reuse detection is not, and must fall through to sign-in.
+      if (allowRefresh && error.code === "token_expired" && (await refreshOnce())) {
+        return request<T>(path, options, { allowRefresh: false });
+      }
+      throw error;
+    }
     // The backend always returns an envelope; a bare failure means something
     // upstream (proxy, gateway) answered instead.
     throw new ApiError(response.status, {

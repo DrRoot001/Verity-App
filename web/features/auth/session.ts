@@ -10,7 +10,7 @@
  * storage.
  */
 
-import { setTokenReader } from "@/lib/api/client";
+import { request, setTokenReader, setTokenRefresher } from "@/lib/api/client";
 import type { AuthResponse, User } from "@/lib/api/types";
 
 const ACCESS_KEY = "verity.access";
@@ -23,6 +23,30 @@ export function bootstrapSession(): void {
   if (typeof window === "undefined") return;
   accessToken = window.sessionStorage.getItem(ACCESS_KEY);
   setTokenReader(() => accessToken);
+  setTokenRefresher(refreshSession);
+}
+
+/**
+ * Trade the refresh token for a new pair. Returns false when the session is
+ * genuinely over — a revoked family or reuse detection — so the caller can
+ * send the user to sign in rather than retrying forever.
+ */
+async function refreshSession(): Promise<boolean> {
+  const refreshToken = window.sessionStorage.getItem(REFRESH_KEY);
+  if (!refreshToken) return false;
+
+  try {
+    const auth = await request<AuthResponse>(
+      "/v1/auth/refresh",
+      { method: "POST", body: { refresh_token: refreshToken } },
+      { allowRefresh: false },
+    );
+    storeSession(auth);
+    return true;
+  } catch {
+    clearSession();
+    return false;
+  }
 }
 
 export function storeSession(auth: AuthResponse): void {

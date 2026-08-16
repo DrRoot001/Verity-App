@@ -108,7 +108,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 2 — Candidate Intelligence core | weeks 6–9 | **DONE** — graph, retrieval, indexing, review/approval API |
 | 3 — Ingestion | weeks 9–12 | **DONE** — pipeline, versioning, diff/merge, HTTP surface; AC-GRAPH-001 & 002 pass |
 | 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — context spine + HTTP surface; AC-WS-001 passes; E1 journey passes over HTTP |
-| 5 — Story Bank & Preparation | weeks 14–17 | NOT STARTED |
+| 5 — Story Bank & Preparation | weeks 14–17 | **DONE** — story generation, ranked plan, readiness, UI; browser-verified |
 | 6 — Mock Interview + AI stack | weeks 17–21 | NOT STARTED |
 | 7 — Realtime infrastructure | weeks 21–25 | NOT STARTED |
 | 8 — Question detection & context | weeks 25–28 | NOT STARTED |
