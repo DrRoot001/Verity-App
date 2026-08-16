@@ -112,7 +112,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 6 — Mock Interview + AI stack | weeks 17–21 | **DONE** — gateway, prompt registry, interviewer engine, reports, learning loop |
 | 7 — Realtime infrastructure | weeks 21–25 | **DONE** — engine, event sourcing + replay, VAD, STT routing with failover; AC-RT-010 passes. WS transport endpoint pending Phase 9 HUD |
 | 8 — Question detection & context | weeks 25–28 | **DONE** — signal fusion, classification, memory, token-budgeted assembly |
-| 9 — Copilot answer engine | weeks 28–31 | NOT STARTED |
+| 9 — Copilot answer engine | weeks 28–31 | **DONE** — dual-lane generation, grounding validator, response modes; AC-COP-002 passes |
 | 10 — Reports & the loop | weeks 31–33 | NOT STARTED |
 | 11 — Billing & entitlements | weeks 33–35 | NOT STARTED |
 | 12 — Desktop application | weeks 30–36 | NOT STARTED |
@@ -165,7 +165,7 @@ These are the constraints that must never regress. Each has a mechanical check.
 | No context reconstruction outside `ContextBundle` | §11.2 FR-WS-003 | `ContextResolver` is the sole entry point; import-linter layers contract | DONE |
 | Every user-owned query is `user_id`-scoped in SQL | §28.2, AC-SEC-001 | cross-user retrieval + ingestion tests; query-shape test pending | PARTIAL |
 | No plan-name literals outside `billing/` | §19 FR-BILL-001 | CI grep check (pending Phase 11) | NOT STARTED |
-| `candidate_fact` requires non-empty `evidence_ids` | §12.6 | evidence resolution rejects unapproved/cross-user ids; schema validator pending Phase 9 | PARTIAL |
+| `candidate_fact` requires non-empty `evidence_ids` | §12.6 | schema-level claim typing + post-generation validator downgrades unsupported facts | DONE |
 | No AI call bypasses the metering wrapper | §33 FR-COST-002 | `AIGateway` is the only path to a provider; budget check + token/cost recording on every call | DONE |
 
 ---
