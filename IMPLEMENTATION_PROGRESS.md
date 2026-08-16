@@ -104,8 +104,8 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 
 | Phase | PRD §43 | Status |
 |---|---|---|
-| 1 — Identity & design system | weeks 3–6 | NOT STARTED |
-| 2 — Candidate Intelligence core | weeks 6–9 | NOT STARTED |
+| 1 — Identity & design system | weeks 3–6 | IN PROGRESS — auth primitives DONE; endpoints + design system pending |
+| 2 — Candidate Intelligence core | weeks 6–9 | **DONE** (see below) |
 | 3 — Ingestion | weeks 9–12 | NOT STARTED |
 | 4 — Workspace + ContextBundle | weeks 12–14 | NOT STARTED |
 | 5 — Story Bank & Preparation | weeks 14–17 | NOT STARTED |
@@ -123,6 +123,36 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 
 ---
 
+---
+
+## Phase 2 — Candidate Intelligence core (DONE)
+
+**Exit gate:** approved entities → retrieval returns correct entities at p95 < 300 ms. Met.
+
+| # | Requirement | PRD ref | Status | Implementation |
+|---|---|---|---|---|
+| 2.1 | Graph schema (10 tables) | §24.3 | DONE | `candidate_graph/models.py`; migration `c90d355cf068` |
+| 2.2 | Provenance layers on every node | §12.2 | DONE | `Provenanced` mixin; `effective()` resolves user_corrected → ai_extracted → column |
+| 2.3 | Approved-only evidence | FR-GRAPH-001 | DONE | Enforced in retrieval + indexer; 3 tests |
+| 2.4 | Unified embedding index | §12.3 | DONE | `graph_embeddings`: HNSW cosine + generated tsvector, verified in-database |
+| 2.5 | Typed hybrid retrieval (RRF) | FR-SRCH-002 | DONE | `retrieval.py` — FTS + pgvector fused, k=60 |
+| 2.6 | One-hop graph expansion | §12.3 | DONE | experience → projects → achievements(+metrics) |
+| 2.7 | Tenant isolation in SQL | AC-SEC-001 | DONE | Ownership predicate in every query; 2 cross-user tests |
+| 2.8 | Degraded retrieval on embedding failure | §20.3 | DONE | Falls back to lexical-only, flags `degraded` |
+| 2.9 | Transactional indexing | §11.4 | DONE | `indexer.py`; story approval → retrievable, test-proven |
+| 2.10 | Content-hash skip | §33 | DONE | Unchanged text skips the embedding call |
+| 2.11 | Vector purge for deletion | §29.4 | DONE | `purge_user()`; test asserts zero rows remain |
+| 2.12 | Provider abstraction | §20.2, NFR-AI-001 | DONE | `ai/providers/base.py` protocols + embeddings; contract-enforced |
+
+**Defects found and fixed during verification:**
+- `plainto_tsquery` resolved to `(varchar, varchar)` which does not exist — required an explicit `regconfig` cast. Lexical search was completely broken and only a live-database test surfaced it.
+- Graph expansion reused one `stmt` variable across two model types; mypy caught the type confusion before it could return wrong-typed rows.
+- Integration fixtures reused the cached application engine across per-test event loops, producing "Event loop is closed" teardown errors. Fixtures now own a `NullPool` engine per test.
+
+**Note on the local embedding provider:** `HashedNgramEmbedding` is a real deterministic *lexical* embedding (hashed character n-grams, sublinear weighting, L2-normalized) — not a semantic model. It exists so retrieval, indexing and deletion are testable offline with no API key, and it is never routed in production. `OpenAICompatibleEmbedding` is the real path and is selected whenever a key is configured.
+
+---
+
 ## Architectural invariants under continuous enforcement
 
 These are the constraints that must never regress. Each has a mechanical check.
@@ -133,9 +163,9 @@ These are the constraints that must never regress. Each has a mechanical check.
 | Layered architecture (apps → modules → ai/realtime → platform) | §22.2 | import-linter contract | DONE |
 | Modules do not import each other's internals | §22.2 | import-linter independence contract | DONE |
 | No context reconstruction outside `ContextBundle` | §11.2 FR-WS-003 | architecture test (pending Phase 4) | NOT STARTED |
-| Every user-owned query is `user_id`-scoped in SQL | §28.2, AC-SEC-001 | query-shape test (pending Phase 1) | NOT STARTED |
+| Every user-owned query is `user_id`-scoped in SQL | §28.2, AC-SEC-001 | cross-user retrieval tests; query-shape test pending | PARTIAL |
 | No plan-name literals outside `billing/` | §19 FR-BILL-001 | CI grep check (pending Phase 11) | NOT STARTED |
-| `candidate_fact` requires non-empty `evidence_ids` | §12.6 | schema validator + eval gate (pending Phase 9) | NOT STARTED |
+| `candidate_fact` requires non-empty `evidence_ids` | §12.6 | evidence resolution rejects unapproved/cross-user ids; schema validator pending Phase 9 | PARTIAL |
 | No AI call bypasses the metering wrapper | §33 FR-COST-002 | provider gateway is the only reachable path (pending Phase 6) | NOT STARTED |
 
 ---
