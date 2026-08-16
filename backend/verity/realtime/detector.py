@@ -284,10 +284,15 @@ def score_signals(
     ends_with_terminal_punctuation: bool,
     candidate_channel_active: bool,
     speech_rate_wpm: float | None = None,
+    endpointed: bool = False,
 ) -> Signals:
     signals = Signals()
 
-    signals.trailing_silence = min(1.0, silence_ms / SILENCE_MS_FOR_BOUNDARY)
+    # An STT provider emitting a *final* transcript has itself decided the
+    # utterance ended, which is the same evidence trailing silence gives. Text
+    # mode carries no audio, so without this every text session would
+    # systematically under-detect and rarely finalize.
+    signals.trailing_silence = 1.0 if endpointed else min(1.0, silence_ms / SILENCE_MS_FOR_BOUNDARY)
     signals.terminal_prosody = 1.0 if ends_with_terminal_punctuation else 0.0
     signals.interrogative = 1.0 if _looks_interrogative(content.strip().lower()) else 0.0
     # The candidate starting to speak is strong evidence the ask landed.
@@ -348,6 +353,7 @@ def detect(
     candidate_channel_active: bool = False,
     speech_rate_wpm: float | None = None,
     previous_question: str | None = None,
+    endpointed: bool = False,
 ) -> Detection:
     stripped = content.strip()
     signals = score_signals(
@@ -356,6 +362,7 @@ def detect(
         ends_with_terminal_punctuation=stripped.endswith((".", "?", "!")),
         candidate_channel_active=candidate_channel_active,
         speech_rate_wpm=speech_rate_wpm,
+        endpointed=endpointed,
     )
     confidence = fuse(signals)
     utterance_class = classify(stripped, previous_question=previous_question)
