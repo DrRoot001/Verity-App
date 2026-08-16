@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
 
+/**
+ * `next build` and `next dev` must not share an output directory. Running a
+ * production build while the dev server is live overwrites the chunks the dev
+ * server has already loaded, and it then fails at runtime with
+ * "Cannot find module './NNN.js'" — a confusing error with no relation to the
+ * code being edited. Giving the build its own distDir removes the collision.
+ */
+const isProductionBuild = process.env.NEXT_BUILD === "1";
+
 const nextConfig: NextConfig = {
+  distDir: isProductionBuild ? ".next-build" : ".next",
   reactStrictMode: true,
   poweredByHeader: false,
   // typedRoutes is off deliberately: every dynamic link in this app is built
