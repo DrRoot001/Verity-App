@@ -15,6 +15,7 @@ MODEL_MODULES: tuple[str, ...] = (
     "verity.modules.identity.models",
     "verity.modules.candidate_graph.models",
     "verity.modules.candidate_graph.embeddings",
+    "verity.modules.documents.models",
 )
 
 

@@ -73,6 +73,12 @@ ignore = [
 # scope identifiers and an OAuth token_type literal, not credentials.
 "verity/platform/ratelimit.py" = ["S105"]
 "verity/modules/identity/schemas.py" = ["S105"]
+# RUF001: en dashes, em dashes and the multiplication sign are not typos here —
+# real resumes use them in date ranges and metrics, so the parser must match them.
+"verity/modules/documents/extraction/resume_parser.py" = ["RUF001"]
+# SIM905: the word lists here are maintained as prose blocks on purpose; a
+# 40-element list literal is materially harder to scan and edit.
+"verity/modules/documents/extraction/text.py" = ["SIM905"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -130,13 +136,26 @@ layers = [
 ]
 exhaustive = false
 
-# Extended as each phase lands a module. Listing a non-existent module fails the
-# run, so this list is always an accurate inventory of what is built.
+# Candidate Intelligence is the canonical layer every consumer reads from
+# (PRD §9.4, §12). Depending on it is the intended direction; depending on a
+# peer feature module is not. So it sits in its own layer rather than being
+# declared independent of everything.
 [[tool.importlinter.contracts]]
-name = "Modules do not import each other's internals"
+name = "Feature modules sit above Candidate Intelligence"
+type = "layers"
+layers = [
+    "verity.modules.documents",
+    "verity.modules.candidate_graph",
+]
+
+# Peer feature modules stay independent of each other. Extended as each phase
+# lands a module; naming one that does not exist fails the run, so this list is
+# always an accurate inventory.
+[[tool.importlinter.contracts]]
+name = "Peer modules do not import each other's internals"
 type = "independence"
 modules = [
     "verity.modules.identity",
     "verity.modules.health",
-    "verity.modules.candidate_graph",
+    "verity.modules.documents",
 ]
