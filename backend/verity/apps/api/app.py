@@ -17,8 +17,10 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from verity.apps.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from verity.modules.candidate_graph.router import profile_router, stories_router
 from verity.modules.health.router import router as health_router
 from verity.modules.identity.router import auth_router, users_router
+from verity.modules.workspace.router import resumes_router, workspaces_router
 from verity.platform.cache import close_redis
 from verity.platform.config import settings
 from verity.platform.db.session import dispose_engine, warm_pool
@@ -126,6 +128,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(users_router)
+    app.include_router(profile_router)
+    app.include_router(stories_router)
+    app.include_router(resumes_router)
+    app.include_router(workspaces_router)
 
     return app
 

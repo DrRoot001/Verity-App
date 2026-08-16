@@ -105,9 +105,9 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | Phase | PRD §43 | Status |
 |---|---|---|
 | 1 — Identity & design system | weeks 3–6 | 1a auth **DONE** (endpoints + tests); 1b design system NOT STARTED |
-| 2 — Candidate Intelligence core | weeks 6–9 | **DONE** (see below) |
-| 3 — Ingestion | weeks 9–12 | **DONE** — resume pipeline, versioning, diff/merge; AC-GRAPH-001 & 002 pass |
-| 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — canonical context spine; AC-WS-001 passes |
+| 2 — Candidate Intelligence core | weeks 6–9 | **DONE** — graph, retrieval, indexing, review/approval API |
+| 3 — Ingestion | weeks 9–12 | **DONE** — pipeline, versioning, diff/merge, HTTP surface; AC-GRAPH-001 & 002 pass |
+| 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — context spine + HTTP surface; AC-WS-001 passes; E1 journey passes over HTTP |
 | 5 — Story Bank & Preparation | weeks 14–17 | NOT STARTED |
 | 6 — Mock Interview + AI stack | weeks 17–21 | NOT STARTED |
 | 7 — Realtime infrastructure | weeks 21–25 | NOT STARTED |
