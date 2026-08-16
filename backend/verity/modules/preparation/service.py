@@ -72,7 +72,9 @@ class PreparationService:
             ).scalars()
         )
 
+        weaknesses = await self._recent_weaknesses(workspace_id)
         candidates = self._build_tasks(bundle, stories)
+        candidates.extend(self._weakness_tasks(weaknesses))
         for task in candidates:
             score(task, workspace.interview_at)
         ordered = schedule(candidates, interview_at=workspace.interview_at)
@@ -260,6 +262,58 @@ class PreparationService:
                 improvement_headroom=0.7,
             )
         )
+        return tasks
+
+    async def _recent_weaknesses(self, workspace_id: uuid.UUID) -> list[dict[str, Any]]:
+        """Weaknesses from the latest report for this workspace.
+
+        This is the Learning Loop (PRD §64): what went wrong last time changes
+        what the next plan asks for, without the user relaying it.
+        """
+        from verity.modules.sessions.models import SessionFeedback
+
+        report = (
+            await self._session.execute(
+                select(SessionFeedback)
+                .where(SessionFeedback.workspace_id == workspace_id)
+                .order_by(SessionFeedback.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if report is None:
+            return []
+        return [w for w in (report.weaknesses or []) if isinstance(w, dict)]
+
+    def _weakness_tasks(self, weaknesses: list[dict[str, Any]]) -> list[ScoredTask]:
+        tasks: list[ScoredTask] = []
+        for weakness in weaknesses:
+            theme = str(weakness.get("theme", "")).strip()
+            dimension = str(weakness.get("dimension", "general"))
+            if not theme:
+                continue
+            severity = float(weakness.get("severity", 0.5))
+            tasks.append(
+                ScoredTask(
+                    section=PlanSection.BEHAVIORAL,
+                    title=f"Practise: {theme[:150]}",
+                    detail=(
+                        f"From your last mock interview ({dimension}). "
+                        + str(weakness.get("evidence", ""))
+                    ).strip(),
+                    action={
+                        "type": "start_mock",
+                        "params": {"focus": dimension, "theme": theme},
+                    },
+                    estimated_minutes=20,
+                    dedupe_key=f"weakness:{dimension}:{theme[:80]}",
+                    gap_severity=severity,
+                    # Measured underperformance is the strongest signal we have
+                    # that a theme will cost the candidate again.
+                    expected_frequency=0.85,
+                    improvement_headroom=severity,
+                    source="report",
+                )
+            )
         return tasks
 
     # ── Persistence ──────────────────────────────────────────────────

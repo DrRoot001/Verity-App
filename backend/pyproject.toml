@@ -140,11 +140,16 @@ exhaustive = false
 # (PRD §9.4, §12). Depending on it is the intended direction; depending on a
 # peer feature module is not. So it sits in its own layer rather than being
 # declared independent of everything.
+#
+# Preparation sits above sessions because the Learning Loop flows one way: a
+# session produces measured weaknesses, and preparation consumes them. Sessions
+# must never read a plan, or the loop becomes a cycle.
 [[tool.importlinter.contracts]]
 name = "Feature modules sit above Candidate Intelligence"
 type = "layers"
 layers = [
     "verity.modules.preparation",
+    "verity.modules.sessions",
     "verity.modules.workspace",
     "verity.modules.documents",
     "verity.modules.candidate_graph",

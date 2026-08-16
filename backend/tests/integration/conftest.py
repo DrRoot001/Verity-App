@@ -21,6 +21,20 @@ from verity.modules.identity.models import User, normalize_email
 from verity.platform.config import settings
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _reset_redis_clients() -> AsyncIterator[None]:
+    """Drop cached Redis clients between tests.
+
+    The clients are module-level singletons bound to the loop that created
+    them, and pytest-asyncio gives each test a fresh loop — the same lifetime
+    mismatch that the per-test engine below avoids.
+    """
+    from verity.platform.cache import close_redis
+
+    yield
+    await close_redis()
+
+
 @pytest_asyncio.fixture
 async def db() -> AsyncIterator[AsyncSession]:
     """A session bound to an outer transaction that is always rolled back.

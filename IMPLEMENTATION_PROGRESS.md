@@ -109,7 +109,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 3 — Ingestion | weeks 9–12 | **DONE** — pipeline, versioning, diff/merge, HTTP surface; AC-GRAPH-001 & 002 pass |
 | 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — context spine + HTTP surface; AC-WS-001 passes; E1 journey passes over HTTP |
 | 5 — Story Bank & Preparation | weeks 14–17 | **DONE** — story generation, ranked plan, readiness, UI; browser-verified |
-| 6 — Mock Interview + AI stack | weeks 17–21 | NOT STARTED |
+| 6 — Mock Interview + AI stack | weeks 17–21 | **DONE** — gateway, prompt registry, interviewer engine, reports, learning loop |
 | 7 — Realtime infrastructure | weeks 21–25 | NOT STARTED |
 | 8 — Question detection & context | weeks 25–28 | NOT STARTED |
 | 9 — Copilot answer engine | weeks 28–31 | NOT STARTED |
@@ -166,7 +166,7 @@ These are the constraints that must never regress. Each has a mechanical check.
 | Every user-owned query is `user_id`-scoped in SQL | §28.2, AC-SEC-001 | cross-user retrieval + ingestion tests; query-shape test pending | PARTIAL |
 | No plan-name literals outside `billing/` | §19 FR-BILL-001 | CI grep check (pending Phase 11) | NOT STARTED |
 | `candidate_fact` requires non-empty `evidence_ids` | §12.6 | evidence resolution rejects unapproved/cross-user ids; schema validator pending Phase 9 | PARTIAL |
-| No AI call bypasses the metering wrapper | §33 FR-COST-002 | provider gateway is the only reachable path (pending Phase 6) | NOT STARTED |
+| No AI call bypasses the metering wrapper | §33 FR-COST-002 | `AIGateway` is the only path to a provider; budget check + token/cost recording on every call | DONE |
 
 ---
 
