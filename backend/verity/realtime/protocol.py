@@ -178,6 +178,11 @@ class QuestionPayload(BaseModel):
     category: str | None = None
     framework: str | None = None
     signals: dict[str, Any] = Field(default_factory=dict)
+    #: The detector's gate (FR-RT-002). Carried on the event so the transport
+    #: cannot re-decide it — a consumer that ignores this generates on small
+    #: talk, which is the exact failure the detector exists to prevent.
+    should_generate: bool = False
+    reason: str = ""
 
 
 class EvidencePayload(BaseModel):

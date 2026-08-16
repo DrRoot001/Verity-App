@@ -110,7 +110,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — context spine + HTTP surface; AC-WS-001 passes; E1 journey passes over HTTP |
 | 5 — Story Bank & Preparation | weeks 14–17 | **DONE** — story generation, ranked plan, readiness, UI; browser-verified |
 | 6 — Mock Interview + AI stack | weeks 17–21 | **DONE** — gateway, prompt registry, interviewer engine, reports, learning loop |
-| 7 — Realtime infrastructure | weeks 21–25 | **DONE** — engine, event sourcing + replay, VAD, STT routing with failover; AC-RT-010 passes. WS transport endpoint pending Phase 9 HUD |
+| 7 — Realtime infrastructure | weeks 21–25 | **DONE** — engine, event sourcing + replay, VAD, STT failover, WebSocket transport with ticket auth; AC-RT-010 passes |
 | 8 — Question detection & context | weeks 25–28 | **DONE** — signal fusion, classification, memory, token-budgeted assembly |
 | 9 — Copilot answer engine | weeks 28–31 | **DONE** — dual-lane generation, grounding validator, response modes; AC-COP-002 passes |
 | 10 — Reports & the loop | weeks 31–33 | NOT STARTED |

@@ -93,6 +93,18 @@ class LiveSessionEngine:
         self._last_flush = time.monotonic()
         self._seq = session.last_event_seq
 
+    def bind(self, db: AsyncSession, session: LiveSession) -> None:
+        """Attach a fresh database session for the next message.
+
+        Per-connection state (pending question, channel activity, memory) lives
+        on the engine; the transaction does not. Holding one open for the length
+        of an interview would pin a pooled connection and turn any slow query
+        into a session-wide stall.
+        """
+        self._db = db
+        self.session = session
+        self._seq = max(self._seq, session.last_event_seq)
+
     # ── Event sourcing (PRD §26.6) ───────────────────────────────────
 
     async def emit(self, event_type: protocol.ServerEvent, payload: Any) -> protocol.Envelope:
@@ -300,6 +312,8 @@ class LiveSessionEngine:
                     sub_parts=result.sub_parts,
                     category=result.utterance_class,
                     signals=result.signals.to_json(),
+                    should_generate=result.should_generate,
+                    reason=result.reason,
                 ),
             )
         )
@@ -339,6 +353,8 @@ class LiveSessionEngine:
                 content=content.strip(),
                 confidence=1.0,
                 signals={"manual": 1.0},
+                should_generate=True,
+                reason="manual request",
             ),
         )
         return question, envelope
