@@ -77,7 +77,7 @@ runtime dependency.
 | 0.13 | Feature flags (PRD §58) | DONE | `platform/flags.py` — global/percentage/plan/user/platform/app-version targeting, fails closed |
 | 0.14 | Local secret bootstrap | DONE | `scripts/bootstrap_env.py` — real Ed25519 JWT keypair + 32-byte DEK |
 | 0.15 | Local dev orchestration | DONE | `Makefile` — setup, infra, migrate, run, verify |
-| 0.16 | Web app shell (Next.js, strict TS) | NOT STARTED | Next up |
+| 0.16 | Web app shell (Next.js, strict TS) | DONE | `web/` — Next 15, strict TS, Tailwind v4 token system |
 | 0.17 | CI workflow | NOT STARTED | Next up |
 | 0.18 | Phase 0 verification run | DONE | See below |
 
@@ -104,7 +104,7 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 
 | Phase | PRD §43 | Status |
 |---|---|---|
-| 1 — Identity & design system | weeks 3–6 | 1a auth **DONE** (endpoints + tests); 1b design system NOT STARTED |
+| 1 — Identity & design system | weeks 3–6 | **DONE** — 1a auth + 1b web app, design system, 11 UX states, browser-verified |
 | 2 — Candidate Intelligence core | weeks 6–9 | **DONE** — graph, retrieval, indexing, review/approval API |
 | 3 — Ingestion | weeks 9–12 | **DONE** — pipeline, versioning, diff/merge, HTTP surface; AC-GRAPH-001 & 002 pass |
 | 4 — Workspace + ContextBundle | weeks 12–14 | **DONE** — context spine + HTTP surface; AC-WS-001 passes; E1 journey passes over HTTP |

@@ -1,0 +1,187 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────
+   Verity Design Language (PRD §23.5)
+
+   Premium, calm, high information density. The canvas is deliberately
+   near-neutral so interview content is the only saturated thing on screen —
+   guidance during a live session has to win the eye without competing with
+   chrome.
+
+   Dark mode is a first-class theme, not an inversion: surfaces lighten with
+   elevation instead of relying on shadow, which does not read on dark.
+   ───────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Surfaces */
+  --color-canvas: #fbfbfa;
+  --color-surface: #ffffff;
+  --color-raised: #f4f5f6;
+  --color-border-subtle: #e6e8ea;
+  --color-border-strong: #d2d6da;
+
+  /* Text — both pairs verified ≥4.5:1 on canvas and surface */
+  --color-text-primary: #14181c;
+  --color-text-secondary: #5a6572;
+  --color-text-muted: #7b8794;
+
+  /* Brand: deep teal. Distinct from the status hues so an accent button is
+     never mistaken for a state. */
+  --color-accent: #1f6f5c;
+  --color-accent-hover: #195a4b;
+  --color-accent-quiet: #e7f1ee;
+  --color-accent-contrast: #ffffff;
+
+  /* Status. Never used alone — every status also carries an icon and a text
+     label (PRD FR-A11Y-005). */
+  --color-critical: #b4382c;
+  --color-critical-quiet: #fbeceb;
+  --color-warning: #9a6b1f;
+  --color-warning-quiet: #fdf3e3;
+  --color-positive: #2e6b3e;
+  --color-positive-quiet: #eaf4ec;
+  --color-info: #2b5c8a;
+  --color-info-quiet: #eaf1f8;
+
+  /* Recording indicator. Reserved: this colour means "capture is live". */
+  --color-live: #b4382c;
+
+  /* Type scale */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-2xs: 0.6875rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+
+  /* Radius */
+  --radius-control: 6px;
+  --radius-card: 10px;
+  --radius-modal: 14px;
+
+  /* Elevation — low diffusion, so cards read as paper rather than as popups */
+  --shadow-1: 0 1px 2px rgb(20 24 28 / 0.04), 0 1px 1px rgb(20 24 28 / 0.03);
+  --shadow-2: 0 2px 6px rgb(20 24 28 / 0.06), 0 1px 2px rgb(20 24 28 / 0.04);
+  --shadow-3: 0 8px 24px rgb(20 24 28 / 0.08), 0 2px 6px rgb(20 24 28 / 0.05);
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-micro: 120ms;
+  --duration-panel: 200ms;
+}
+
+/* Dark theme. Explicit override wins in both directions, and the default
+   (no attribute) follows the system. */
+:root:not([data-theme="light"]) {
+  @media (prefers-color-scheme: dark) {
+    --color-canvas: #0e1012;
+    --color-surface: #16191d;
+    --color-raised: #1e2227;
+    --color-border-subtle: #282d33;
+    --color-border-strong: #3a4149;
+    --color-text-primary: #edf0f2;
+    --color-text-secondary: #9aa5b1;
+    --color-text-muted: #7d8894;
+    --color-accent: #3fa88d;
+    --color-accent-hover: #4fbb9e;
+    --color-accent-quiet: #14312a;
+    --color-accent-contrast: #06120f;
+    --color-critical: #e06b5c;
+    --color-critical-quiet: #2c1714;
+    --color-warning: #dba43c;
+    --color-warning-quiet: #2b2113;
+    --color-positive: #5ea971;
+    --color-positive-quiet: #14251a;
+    --color-info: #6ba3d6;
+    --color-info-quiet: #13212e;
+    --color-live: #e06b5c;
+  }
+}
+
+[data-theme="dark"] {
+  --color-canvas: #0e1012;
+  --color-surface: #16191d;
+  --color-raised: #1e2227;
+  --color-border-subtle: #282d33;
+  --color-border-strong: #3a4149;
+  --color-text-primary: #edf0f2;
+  --color-text-secondary: #9aa5b1;
+  --color-text-muted: #7d8894;
+  --color-accent: #3fa88d;
+  --color-accent-hover: #4fbb9e;
+  --color-accent-quiet: #14312a;
+  --color-accent-contrast: #06120f;
+  --color-critical: #e06b5c;
+  --color-critical-quiet: #2c1714;
+  --color-warning: #dba43c;
+  --color-warning-quiet: #2b2113;
+  --color-positive: #5ea971;
+  --color-positive-quiet: #14251a;
+  --color-info: #6ba3d6;
+  --color-info-quiet: #13212e;
+  --color-live: #e06b5c;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus is never removed, and always meets 3:1 against its surroundings
+   (PRD FR-A11Y-002). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* PRD FR-A11Y-007: motion is a preference, and realtime surfaces cap at
+   opacity regardless. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes verity-shimmer {
+  0% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.55;
+  }
+}
+
+.skeleton {
+  background-color: var(--color-raised);
+  animation: verity-shimmer 1.6s var(--ease-standard) infinite;
+}
+
+/* Transcript reading: longer measure and looser leading for sustained
+   scanning during a session (PRD §23.5). */
+.transcript-line {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}

@@ -36,3 +36,7 @@ test-results/
 
 # OS
 .DS_Store
+
+# Next.js
+web/.next/
+web/node_modules/
