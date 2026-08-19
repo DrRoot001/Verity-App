@@ -1,0 +1,428 @@
+/* Verity desktop HUD.
+ *
+ * A separate stylesheet from the web app on purpose: this window sits on top of
+ * a video call in the corner of the screen, at a fraction of the size, and is
+ * read in one-second glances while someone is talking to you. Everything here
+ * follows from that — dark so it does not glow over a call, one accent colour,
+ * and the answer direction set larger than anything else because it is the only
+ * thing that must be readable without focusing.
+ */
+
+:root {
+  --bg: #16161a;
+  --surface: #1e1e24;
+  --raised: #26262e;
+  --border: #33333d;
+  --text: #f2f1ee;
+  --muted: #9a9aa6;
+  --accent: #a5a0ff;
+  --live: #ff6b6b;
+  --positive: #4ade80;
+  --radius: 10px;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  min-height: 100vh;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hidden {
+  display: none;
+}
+
+.brand-row,
+.brand {
+  display: flex;
+  align-items: center;
+}
+.brand-row {
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.brand {
+  gap: 8px;
+  font-weight: 600;
+}
+.mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #1a1a2e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lede {
+  margin: 0 0 6px;
+  color: var(--muted);
+}
+
+.local-badge {
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--positive) 45%, var(--border));
+  border-radius: 999px;
+  color: var(--positive);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.hero-copy {
+  margin: 4px 0 8px;
+}
+.hero-copy h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+.hero-copy p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.field-grid > div,
+.details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+summary {
+  padding: 8px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.details-body {
+  padding: 0 10px 10px;
+}
+
+label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  user-select: text;
+  font-family: inherit;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+textarea {
+  resize: vertical;
+  min-height: 62px;
+}
+.inline-row,
+.document-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.inline-row .hint,
+.document-row .hint {
+  flex: 1;
+}
+.small-button {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  background: var(--raised);
+  color: var(--text);
+  border-color: var(--border);
+  font-size: 11px;
+}
+.small-button:disabled {
+  opacity: .5;
+  cursor: progress;
+}
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.context-panel .details-body {
+  gap: 7px;
+}
+
+button {
+  padding: 9px 12px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.primary {
+  background: var(--accent);
+  color: #1a1a2e;
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+.ghost {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+}
+
+.choice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  margin: 0;
+}
+.choice legend {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px;
+}
+.choice label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+.setting-toggle input {
+  width: auto;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+.setting-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.setting-toggle strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.setting-toggle small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--live);
+  min-height: 1em;
+}
+
+/* ── HUD ───────────────────────────────────────────────────────── */
+
+.hud-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.latency {
+  margin-left: auto;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.dot.live {
+  background: var(--live);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.icon-chip {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--raised);
+  color: var(--text);
+  border-color: var(--border);
+}
+.icon-chip.danger {
+  color: var(--live);
+}
+.icon-chip.protected[aria-pressed="true"] {
+  color: var(--positive);
+}
+.icon-chip[aria-pressed="false"] {
+  opacity: 0.55;
+}
+
+.card {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.answer-card {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.label {
+  margin: 0 0 2px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.question p:last-child {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* The single most important element in the product. */
+.direction {
+  margin: 0 0 10px;
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+#points {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#points li {
+  font-size: 14px;
+}
+#points li.general::after {
+  content: " general";
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.structure {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--raised);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.heard {
+  margin: 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  min-height: 1em;
+}
+
+.transcript-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+.level-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.pulse-ring {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 15%, transparent);
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+.pulse-ring.voiced {
+  background: var(--positive);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--positive) 20%, transparent);
+}
+.level-meter {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--muted) 20%, transparent);
+  overflow: hidden;
+}
+.level-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--positive);
+  transition: width 80ms linear;
+}

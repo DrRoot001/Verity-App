@@ -42,3 +42,13 @@ web/.next/
 web/node_modules/
 
 web/.next-build/
+
+# Rust / Tauri desktop app
+desktop/src-tauri/target/
+desktop/src-tauri/gen/schemas/
+
+# Packaged desktop builds (produced by `cargo tauri build`)
+*.dmg
+*.msi
+*.AppImage
+Verity-Desktop-Standalone.zip

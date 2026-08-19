@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- macOS terminates any app that opens an input device without this string,
+       and shows it verbatim in the permission prompt. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Verity listens to your interview so it can show you guidance while you answer.</string>
+  <!-- macOS 13+ only: lets Verity tap system audio directly via
+       ScreenCaptureKit instead of requiring a loopback device. Verity does
+       not record or transmit your screen. -->
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Verity uses this to hear interview call audio directly, without a virtual audio device.</string>
+</dict>
+</plist>

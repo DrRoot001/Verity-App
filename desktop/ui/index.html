@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verity Interview Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <section id="setup" class="pane">
+      <header class="brand-row">
+        <div class="brand"><span class="mark">V</span><span>Verity</span></div>
+        <span class="local-badge">Standalone</span>
+      </header>
+      <div class="hero-copy">
+        <h1>Live Interview Assistant</h1>
+        <p>No account or web dashboard. Choose an audio source and start listening.</p>
+        <p class="hint">macOS will ask once for microphone access (and, on macOS 13+, screen-recording access — used only to hear call audio, never to record your screen). You can grant both now so nothing interrupts your interview later.</p>
+      </div>
+
+      <label for="groq-keys">Groq API keys</label>
+      <textarea id="groq-keys" rows="3" spellcheck="false" placeholder="One gsk_… key per line"></textarea>
+      <div class="inline-row">
+        <p id="key-hint" class="hint">Stored only in this Mac's local Verity preferences.</p>
+        <button id="test-api-btn" class="small-button" type="button">Test connection</button>
+      </div>
+
+      <div class="field-grid">
+        <div>
+          <label for="role-title">Role</label>
+          <input id="role-title" placeholder="e.g. Backend Engineer" />
+        </div>
+        <div>
+          <label for="company-name">Company</label>
+          <input id="company-name" placeholder="Optional" />
+        </div>
+      </div>
+
+      <details class="context-panel" open>
+        <summary>Interview context</summary>
+        <div class="details-body">
+          <label for="resume-text">Resume</label>
+          <textarea id="resume-text" rows="5" placeholder="Paste resume text or import a document"></textarea>
+          <div class="document-row">
+            <input id="resume-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
+            <button class="small-button import-button" type="button" data-file="resume-file" data-target="resume-text">Import resume</button>
+            <span id="resume-count" class="hint">0 characters</span>
+          </div>
+
+          <label for="job-description">Job description</label>
+          <textarea id="job-description" rows="5" placeholder="Paste the role requirements or import a document"></textarea>
+          <div class="document-row">
+            <input id="job-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
+            <button class="small-button import-button" type="button" data-file="job-file" data-target="job-description">Import job description</button>
+            <span id="job-count" class="hint">0 characters</span>
+          </div>
+          <p class="hint">PDF, TXT, or Markdown, up to 10 MB. Context keeps answers relevant and prevents invented resume facts.</p>
+        </div>
+      </details>
+
+      <label for="device">Interview audio</label>
+      <select id="device"></select>
+      <p id="device-hint" class="hint"></p>
+
+      <details>
+        <summary>Advanced settings</summary>
+        <div class="details-body">
+          <label for="language">Interview language</label>
+          <select id="language">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="pt">Portuguese</option>
+            <option value="hi">Hindi</option>
+          </select>
+          <label for="chat-model">Groq answer model</label>
+          <input id="chat-model" value="allam-2-7b" />
+        </div>
+      </details>
+
+      <label class="setting-toggle" for="protect-capture">
+        <input id="protect-capture" class="protect-capture-toggle" type="checkbox" checked />
+        <span>
+          <strong>Protect HUD from screen capture</strong>
+          <small>Enabled by default where macOS supports it.</small>
+        </span>
+      </label>
+
+      <button id="start-btn" class="primary">Start live assistant</button>
+      <p id="setup-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="hud" class="pane hidden">
+      <header class="hud-bar">
+        <span id="dot" class="dot live"></span>
+        <span id="status">Listening</span>
+        <span id="latency" class="latency">Waiting for a question</span>
+        <button id="protect-btn" class="icon-chip protected" aria-pressed="true" title="HUD capture protection">Shield</button>
+        <button id="pin-btn" class="icon-chip" aria-pressed="true" title="Keep on top">Pinned</button>
+        <button id="stop-btn" class="icon-chip danger">Stop</button>
+      </header>
+
+      <div class="question card">
+        <p class="label">Interviewer</p>
+        <p id="question">Listening for a question…</p>
+      </div>
+
+      <div class="guidance card answer-card">
+        <p class="label">Suggested answer</p>
+        <p id="direction" class="direction">Your answer will stream here as soon as a question is detected.</p>
+        <ul id="points"></ul>
+        <p id="structure" class="structure"></p>
+      </div>
+
+      <div class="level-row">
+        <span id="pulse-ring" class="pulse-ring"></span>
+        <div class="level-meter" title="Live input level">
+          <div id="level-fill" class="level-fill"></div>
+        </div>
+      </div>
+      <div class="transcript-row">
+        <p id="heard" class="heard">Listening for audio…</p>
+      </div>
+      <p id="hud-error" class="error" role="alert"></p>
+    </section>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

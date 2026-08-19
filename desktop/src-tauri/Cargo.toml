@@ -1,0 +1,43 @@
+[package]
+name = "verity-desktop"
+version = "0.2.0"
+description = "Verity live interview assistant"
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+cpal = "0.15"
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+anyhow = "1"
+pdf-extract = "0.12"
+
+# ScreenCaptureKit-based native system-audio capture. Opt-in via the
+# `native-system-audio` feature (see [features] below), not a plain
+# dependency: the crate bridges a Swift package that requires Swift tools
+# 5.9+ (Xcode 15+, which itself requires macOS 13.5+ to install). A build
+# machine still on an older Xcode/macOS cannot compile this at all, so it
+# must not be part of the default build - enable it explicitly once your
+# toolchain supports it: `cargo build --features native-system-audio`.
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "8", features = ["macos_13_0"], optional = true }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+native-system-audio = ["dep:screencapturekit"]
+
+# A live interview is the one moment a stutter is unacceptable, so the release
+# build is optimised for speed rather than binary size.
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
