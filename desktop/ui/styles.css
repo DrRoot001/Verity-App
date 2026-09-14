@@ -6,19 +6,31 @@
  * follows from that — dark so it does not glow over a call, one accent colour,
  * and the answer direction set larger than anything else because it is the only
  * thing that must be readable without focusing.
+ *
+ * The window itself is transparent (tauri.conf.json), so every surface here is
+ * translucent + blurred rather than solid: the app should read as "glass over
+ * your call", not as an opaque box sitting on top of it. Opacity stays modest
+ * (~0.85-0.92) and every blur is paired with a near-solid text color, so the
+ * one thing that must never happen — losing contrast against whatever is
+ * playing behind it — doesn't.
  */
 
 :root {
   --bg: #16161a;
-  --surface: #1e1e24;
-  --raised: #26262e;
-  --border: #33333d;
-  --text: #f2f1ee;
-  --muted: #9a9aa6;
+  --bg-rgb: 16, 16, 20;
+  --surface-rgb: 30, 30, 38;
+  --raised-rgb: 40, 40, 50;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --text: #f5f4f2;
+  --muted: #a3a2af;
   --accent: #a5a0ff;
-  --live: #ff6b6b;
+  --accent-rgb: 165, 160, 255;
+  --live: #ff7a7a;
   --positive: #4ade80;
-  --radius: 10px;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.55), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
   color-scheme: dark;
 }
 
@@ -26,10 +38,19 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  background: transparent;
+}
+
 body {
   margin: 0;
   padding: 14px;
-  background: var(--bg);
+  /* The window is transparent; this near-opaque wash is the one thing that
+     keeps text legible over an arbitrary video call behind it. */
+  background: rgba(var(--bg-rgb), 0.88);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  backdrop-filter: blur(28px) saturate(150%);
   color: var(--text);
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -40,7 +61,7 @@ body {
 .pane {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .hidden {
   display: none;
@@ -58,17 +79,19 @@ body {
 .brand {
   gap: 8px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 .mark {
   display: grid;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: var(--accent);
-  color: #1a1a2e;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: linear-gradient(155deg, var(--accent), #7f78ff);
+  color: #17172a;
   font-size: 12px;
   font-weight: 700;
+  box-shadow: 0 2px 8px -1px rgba(var(--accent-rgb), 0.5);
 }
 
 .lede {
@@ -77,22 +100,25 @@ body {
 }
 
 .local-badge {
-  padding: 3px 7px;
+  padding: 3px 8px;
   border: 1px solid color-mix(in srgb, var(--positive) 45%, var(--border));
   border-radius: 999px;
+  background: color-mix(in srgb, var(--positive) 12%, transparent);
   color: var(--positive);
   font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .hero-copy {
-  margin: 4px 0 8px;
+  margin: 2px 0 8px;
 }
 .hero-copy h1 {
   margin: 0;
   font-size: 20px;
   line-height: 1.25;
+  letter-spacing: -0.01em;
 }
 .hero-copy p {
   margin: 4px 0 0;
@@ -115,41 +141,84 @@ body {
 details {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(var(--surface-rgb), 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  overflow: hidden;
+  transition: border-color 120ms ease;
+}
+details[open] {
+  border-color: var(--border-strong);
 }
 summary {
-  padding: 8px 10px;
+  padding: 9px 11px;
   color: var(--muted);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--muted);
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 120ms ease;
+}
+details[open] summary::before {
+  transform: rotate(90deg);
 }
 .details-body {
-  padding: 0 10px 10px;
+  padding: 2px 11px 12px;
 }
 
 label {
   font-size: 12px;
   color: var(--muted);
+  font-weight: 500;
 }
 
 input,
 select,
 textarea {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--radius);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: rgba(var(--raised-rgb), 0.55);
   color: var(--text);
   font-size: 14px;
   user-select: text;
   font-family: inherit;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 75%, transparent);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: var(--border-strong);
 }
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(var(--raised-rgb), 0.75);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+select {
+  cursor: pointer;
 }
 textarea {
   resize: vertical;
@@ -168,14 +237,24 @@ textarea {
 }
 .small-button {
   flex: 0 0 auto;
-  padding: 5px 8px;
-  background: var(--raised);
+  padding: 6px 10px;
+  background: rgba(var(--raised-rgb), 0.7);
   color: var(--text);
-  border-color: var(--border);
+  border: 1px solid var(--border);
   font-size: 11px;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: background-color 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+.small-button:hover:not(:disabled) {
+  background: rgba(var(--raised-rgb), 0.95);
+  border-color: var(--border-strong);
+}
+.small-button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 .small-button:disabled {
-  opacity: .5;
+  opacity: 0.5;
   cursor: progress;
 }
 .file-input {
@@ -190,20 +269,31 @@ textarea {
 }
 
 button {
-  padding: 9px 12px;
-  border-radius: var(--radius);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
+  font-family: inherit;
+  transition: filter 120ms ease, transform 80ms ease, opacity 120ms ease;
 }
 .primary {
-  background: var(--accent);
-  color: #1a1a2e;
+  width: 100%;
+  background: linear-gradient(155deg, var(--accent), #7f78ff);
+  color: #17172a;
+  box-shadow: 0 6px 18px -4px rgba(var(--accent-rgb), 0.45);
+}
+.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+.primary:active:not(:disabled) {
+  transform: scale(0.99);
 }
 .primary:disabled {
   opacity: 0.5;
   cursor: progress;
+  box-shadow: none;
 }
 .ghost {
   background: transparent;
@@ -234,11 +324,15 @@ button {
   display: flex;
   align-items: flex-start;
   gap: 9px;
-  padding: 9px 10px;
+  padding: 10px 11px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(var(--surface-rgb), 0.55);
   cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.setting-toggle:hover {
+  border-color: var(--border-strong);
 }
 .setting-toggle input {
   width: auto;
@@ -253,7 +347,7 @@ button {
 .setting-toggle strong {
   color: var(--text);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
 }
 .setting-toggle small {
   color: var(--muted);
@@ -279,7 +373,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted);
@@ -288,6 +382,7 @@ button {
   margin-left: auto;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 .dot {
   width: 8px;
@@ -297,6 +392,7 @@ button {
 }
 .dot.live {
   background: var(--live);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--live) 22%, transparent);
   animation: pulse 1.4s ease-in-out infinite;
 }
 @keyframes pulse {
@@ -306,11 +402,17 @@ button {
 }
 
 .icon-chip {
-  padding: 4px 8px;
+  padding: 5px 9px;
   font-size: 12px;
-  background: var(--raised);
+  font-weight: 500;
+  background: rgba(var(--raised-rgb), 0.65);
   color: var(--text);
-  border-color: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+.icon-chip:hover {
+  background: rgba(var(--raised-rgb), 0.9);
 }
 .icon-chip.danger {
   color: var(--live);
@@ -323,20 +425,25 @@ button {
 }
 
 .card {
-  padding: 10px 11px;
+  padding: 11px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: rgba(var(--surface-rgb), 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
 }
 .answer-card {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: rgba(var(--surface-rgb), 0.68);
+  box-shadow: var(--shadow);
 }
 
 .label {
-  margin: 0 0 2px;
+  margin: 0 0 4px;
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
   color: var(--muted);
 }
 
@@ -350,9 +457,9 @@ button {
 .direction {
   margin: 0 0 10px;
   font-size: 17px;
-  line-height: 1.35;
+  line-height: 1.4;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--text);
 }
 
 #points {
@@ -373,9 +480,9 @@ button {
 
 .structure {
   margin: 10px 0 0;
-  padding: 7px 9px;
-  border-radius: 8px;
-  background: var(--raised);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(var(--raised-rgb), 0.6);
   font-size: 12px;
   color: var(--muted);
 }
@@ -423,6 +530,103 @@ button {
 .level-fill {
   height: 100%;
   width: 0%;
-  background: var(--positive);
+  background: linear-gradient(90deg, var(--positive), #7fe8a8);
   transition: width 80ms linear;
+}
+
+/* ── Conversation thread ──────────────────────────────────────── */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.thread-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.thread-count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.thread-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.thread-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.thread-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.thread-q,
+.thread-a {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.thread-q {
+  color: var(--muted);
+}
+.thread-q::before {
+  content: "Q  ";
+  font-weight: 700;
+  color: var(--muted);
+}
+.thread-a {
+  color: var(--text);
+  /* A bullet-point answer's key_points are folded into this text with real
+     newlines (see main.js's answer.complete handler) — without this, they
+     would render collapsed onto one squished line instead of one per point. */
+  white-space: pre-line;
+}
+.thread-a::before {
+  content: "A  ";
+  font-weight: 700;
+  color: var(--accent);
+}
+
+
+/* The words the candidate actually says. Sized to be read out loud at a
+   glance mid-sentence, which is the whole job of this pane. */
+.answer {
+  margin: 0 0 10px;
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--text, #f2f4f8);
+  white-space: pre-wrap;
+}
+
+.answer:empty {
+  display: none;
+}
+
+/* Names and figures no approved evidence backs. Shown rather than silently
+   trusted — reading an invented metric out loud is the worst failure here. */
+.unverified {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #f0b429;
+}
+
+.unverified:empty {
+  display: none;
 }

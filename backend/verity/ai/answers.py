@@ -43,6 +43,8 @@ class ResponseMode(StrEnum):
 class ModeSpec:
     """PRD §14.5. Caps are enforced server-side, not requested politely."""
 
+    #: Sentences of the verbatim answer the candidate reads aloud. 0 = bullets only.
+    answer_sentences: int
     direction_sentences: int
     max_points: int
     max_words_per_point: int
@@ -52,13 +54,13 @@ class ModeSpec:
 
 
 MODES: dict[str, ModeSpec] = {
-    ResponseMode.CONCISE: ModeSpec(1, 3, 12, 2, False, False),
-    ResponseMode.BALANCED: ModeSpec(2, 4, 18, 3, True, False),
-    ResponseMode.DETAILED: ModeSpec(2, 5, 25, 4, True, True),
-    ResponseMode.TALKING_POINTS: ModeSpec(0, 5, 10, 3, False, False),
-    ResponseMode.STAR: ModeSpec(1, 4, 20, 3, True, False),
-    ResponseMode.EXECUTIVE: ModeSpec(1, 3, 16, 2, True, False),
-    ResponseMode.TECHNICAL: ModeSpec(1, 5, 25, 3, True, True),
+    ResponseMode.CONCISE: ModeSpec(2, 1, 3, 18, 2, False, False),
+    ResponseMode.BALANCED: ModeSpec(4, 1, 4, 24, 3, True, False),
+    ResponseMode.DETAILED: ModeSpec(7, 1, 5, 32, 4, True, True),
+    ResponseMode.TALKING_POINTS: ModeSpec(0, 0, 5, 14, 3, False, False),
+    ResponseMode.STAR: ModeSpec(6, 1, 4, 26, 3, True, False),
+    ResponseMode.EXECUTIVE: ModeSpec(3, 1, 3, 20, 2, True, False),
+    ResponseMode.TECHNICAL: ModeSpec(6, 1, 5, 32, 3, True, True),
 }
 
 #: Auto-selected per question class unless the user pins a mode (FR-COP-003).
@@ -85,8 +87,9 @@ def select_mode(utterance_class: str, question: str, pinned: str | None = None) 
 
 ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "required": ["answer_direction", "key_points"],
+    "required": ["spoken_answer", "key_points"],
     "properties": {
+        "spoken_answer": {"type": "string"},
         "answer_direction": {"type": "string"},
         "key_points": {
             "type": "array",
@@ -129,12 +132,15 @@ class KeyPoint:
 class Answer:
     answer_direction: str
     key_points: list[KeyPoint]
+    #: The literal words to say, first person, ready to read aloud.
+    spoken_answer: str = ""
     structure: str | None = None
     gaps: list[dict[str, str]] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return {
+            "spoken_answer": self.spoken_answer,
             "answer_direction": self.answer_direction,
             "key_points": [
                 {
@@ -168,13 +174,18 @@ class GroundingReport:
     checked: int = 0
     downgraded: int = 0
     violations: list[dict[str, str]] = field(default_factory=list)
-    validator_version: str = "grounding@1"
+    #: Names and figures in ``spoken_answer`` that no evidence backs. Prose
+    #: cannot be downgraded the way a typed key point can, so it is flagged for
+    #: the UI to mark rather than rewritten mid-interview.
+    unverified: list[str] = field(default_factory=list)
+    validator_version: str = "grounding@2"
 
     def to_json(self) -> dict[str, Any]:
         return {
             "checked": self.checked,
             "downgraded": self.downgraded,
             "violations": self.violations,
+            "unverified": self.unverified,
             "validator_version": self.validator_version,
         }
 
@@ -211,7 +222,11 @@ def _numerals(text: str) -> set[str]:
 
 
 def validate_grounding(
-    answer: Answer, evidence: list[dict[str, Any]], *, prompt_id: str = "copilot.answer"
+    answer: Answer,
+    evidence: list[dict[str, Any]],
+    *,
+    prompt_id: str = "copilot.answer",
+    extra_corpus: str = "",
 ) -> GroundingReport:
     """Downgrade any candidate_fact the evidence does not support (§12.6 step 3).
 
@@ -222,7 +237,9 @@ def validate_grounding(
     """
     report = GroundingReport()
     by_id = {str(item.get("id")): item for item in evidence}
-    corpus = " ".join(f"{item.get('label', '')} {item.get('text', '')}" for item in evidence)
+    corpus = " ".join(
+        [*(f"{item.get('label', '')} {item.get('text', '')}" for item in evidence), extra_corpus]
+    )
     corpus_entities = _entities(corpus)
     corpus_numerals = _numerals(corpus)
 
@@ -256,6 +273,15 @@ def validate_grounding(
         else:
             point.evidence_ids = cited
 
+    if answer.spoken_answer:
+        loose = sorted(
+            (_entities(answer.spoken_answer) - corpus_entities)
+            | (_numerals(answer.spoken_answer) - corpus_numerals)
+        )
+        if loose:
+            report.unverified = loose
+            grounding_violations.labels(prompt_id=f"{prompt_id}.spoken").inc()
+
     return report
 
 
@@ -277,6 +303,14 @@ def enforce_mode(answer: Answer, mode: str) -> Answer:
     """
     spec = MODES.get(mode, MODES[ResponseMode.BALANCED])
 
+    if spec.answer_sentences == 0:
+        answer.spoken_answer = ""
+    elif answer.spoken_answer:
+        # Cut on a sentence boundary only. A spoken answer clipped mid-clause is
+        # worse than a short one — the candidate is reading it out loud.
+        said = _SENTENCE_SPLIT.split(answer.spoken_answer.strip())
+        answer.spoken_answer = " ".join(said[: spec.answer_sentences]).strip()
+
     if spec.direction_sentences == 0:
         answer.answer_direction = ""
     else:
@@ -293,11 +327,52 @@ def enforce_mode(answer: Answer, mode: str) -> Answer:
 
     if not spec.include_structure:
         answer.structure = None
+    elif not (answer.structure or "").strip():
+        # The mode wants a structure and the model did not name one. A shape is
+        # the most useful thing on the screen for a candidate who has gone
+        # blank, so fall back rather than render nothing.
+        answer.structure = STRUCTURE_BY_MODE.get(mode, STRUCTURE_BY_MODE[ResponseMode.BALANCED])
+
     answer.evidence = answer.evidence[: spec.max_evidence]
     return answer
 
 
-def parse_answer(payload: dict[str, Any], evidence: list[dict[str, Any]]) -> Answer:
+def _echoes(direction: str, question: str) -> bool:
+    """True when the 'answer direction' is really just the question again.
+
+    Models reach for restating the prompt when they are unsure. The candidate
+    has already heard the question and is waiting to know what to *say*, so an
+    echo is worse than an empty field — it burns the most valuable line on the
+    screen at the moment they have the least time to read it.
+    """
+    if not direction or not question:
+        return False
+
+    def shape(text: str) -> set[str]:
+        return set(re.findall(r"[a-z']{3,}", text.lower()))
+
+    asked, said = shape(question), shape(direction)
+    if not asked or not said:
+        return False
+    overlap = len(asked & said) / len(said)
+    return overlap > 0.7
+
+
+#: The shape an answer should follow when the model does not name one.
+STRUCTURE_BY_MODE: dict[str, str] = {
+    ResponseMode.STAR: "Situation → Task → Action → Result",
+    ResponseMode.TECHNICAL: "Constraints → Approach → Trade-offs",
+    ResponseMode.EXECUTIVE: "Outcome → How → What it cost",
+    ResponseMode.BALANCED: "Context → What you did → Result",
+    ResponseMode.DETAILED: "Context → What you did → Result → What you learned",
+    ResponseMode.TALKING_POINTS: "Lead with the outcome, then the detail",
+    ResponseMode.CONCISE: "Answer first, one supporting detail",
+}
+
+
+def parse_answer(
+    payload: dict[str, Any], evidence: list[dict[str, Any]], *, question: str = ""
+) -> Answer:
     by_id = {str(item.get("id")): item for item in evidence}
     points: list[KeyPoint] = []
 
@@ -312,9 +387,14 @@ def parse_answer(payload: dict[str, Any], evidence: list[dict[str, Any]]) -> Ans
             )
         )
 
+    direction = str(payload.get("answer_direction", "")).strip()
+    if _echoes(direction, question):
+        direction = ""
+
     return Answer(
-        answer_direction=str(payload.get("answer_direction", "")).strip(),
+        answer_direction=direction,
         key_points=points,
+        spoken_answer=str(payload.get("spoken_answer", "")).strip(),
         structure=payload.get("structure"),
         gaps=[g for g in payload.get("gaps", []) if isinstance(g, dict)],
         evidence=[

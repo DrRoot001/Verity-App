@@ -14,6 +14,7 @@ session-wide stall.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -30,13 +31,16 @@ from verity.modules.sessions.live_models import (
     DetectedQuestion,
     LiveSession,
 )
+from verity.modules.sessions.live_report import LiveReportService
 from verity.modules.workspace.service import WorkspaceService
 from verity.platform.cache import RedisRole, get_redis
 from verity.platform.db.session import transaction
 from verity.platform.errors import AppError, ErrorCode
 from verity.platform.logging import get_logger
+from verity.platform.runtime_config import feature_enabled
 from verity.platform.security import generate_token, hash_token
 from verity.realtime import protocol
+from verity.realtime.stt import build_stt_router, frame_rms
 
 log = get_logger("sessions.live_router")
 
@@ -73,6 +77,8 @@ class TicketResponse(BaseModel):
 async def create_live_session(
     payload: LiveSessionCreate, principal: VerifiedUser, session: SessionDep
 ) -> LiveSessionResponse:
+    if not await feature_enabled("live_copilot", user_id=principal.user.id):
+        raise AppError(ErrorCode.FORBIDDEN, "Live Copilot is temporarily unavailable.")
     workspace = await WorkspaceService(session).get(
         user_id=principal.user.id, workspace_id=payload.workspace_id
     )
@@ -155,6 +161,9 @@ async def realtime_socket(websocket: WebSocket, session_id: uuid.UUID) -> None:
 
     await websocket.accept(subprotocol=protocol.SUBPROTOCOL)
     engine: LiveSessionEngine | None = None
+    # One router per connection: providers buffer per channel, so sharing it
+    # across sessions would splice two interviews into one utterance.
+    stt = build_stt_router()
 
     try:
         while True:
@@ -164,16 +173,40 @@ async def realtime_socket(websocket: WebSocket, session_id: uuid.UUID) -> None:
                 break
 
             if (payload := message.get("bytes")) is not None:
-                # Audio frames: decoded and metered, transcription arrives via
-                # the STT router in the desktop path.
+                # Audio frames from the desktop capture. The router batches them
+                # into utterances and returns text; from there the path is
+                # identical to the web client's, so detection and guidance
+                # behave the same whichever client is speaking.
                 try:
                     frame = protocol.decode_audio_frame(payload)
                 except ValueError:
                     continue
-                if engine is not None:
-                    engine.state.channel(frame.channel).update(
-                        rms=0.0, timestamp_ms=frame.timestamp_ms
+                if engine is None:
+                    continue
+
+                engine.state.channel(frame.channel).update(
+                    rms=frame_rms(frame.payload), timestamp_ms=frame.timestamp_ms
+                )
+                try:
+                    results = await stt.transcribe(frame.channel, frame.payload, frame.timestamp_ms)
+                except Exception as exc:
+                    log.warning("stt_failed", error_type=type(exc).__name__)
+                    continue
+
+                for result in results:
+                    envelope = protocol.Envelope(
+                        session_id=session_id,
+                        type=protocol.ClientEvent.TRANSCRIPT_TEXT,
+                        payload={
+                            "channel": result.channel,
+                            "content": result.content,
+                            "is_final": True,
+                            "start_ms": result.start_ms,
+                            "end_ms": result.end_ms,
+                            "confidence": result.confidence,
+                        },
                     )
+                    engine = await _handle(websocket, envelope, engine, user_id, session_id)
                 continue
 
             text = message.get("text")
@@ -244,16 +277,19 @@ async def _handle(
                     confidence=payload.confidence,
                 )
                 outbound.extend(events)
-                outbound.extend(await _maybe_guide(db, engine, events))
+                outbound.extend(await _maybe_guide(db, engine, events, websocket))
 
             case protocol.ClientEvent.QUESTION_MANUAL:
                 manual = protocol.ManualQuestionPayload.model_validate(envelope.payload)
                 question, event = await engine.manual_question(manual.content)
                 outbound.append(event)
-                outbound.extend(await _guide(db, engine, question, manual.response_mode))
+                outbound.extend(await _guide(db, engine, question, manual.response_mode, websocket))
 
             case protocol.ClientEvent.SESSION_END:
                 await engine.end(reason="client_ended")
+                # PRD §27: the report is produced automatically. Generating it
+                # here means it is already waiting when the user opens it.
+                await LiveReportService(db).generate(user_id=user_id, session_id=session_id)
                 outbound.append(
                     await engine.emit(
                         protocol.ServerEvent.SESSION_ENDED,
@@ -278,7 +314,10 @@ async def _handle(
 
 
 async def _maybe_guide(
-    db: AsyncSession, engine: LiveSessionEngine, events: list[protocol.Envelope]
+    db: AsyncSession,
+    engine: LiveSessionEngine,
+    events: list[protocol.Envelope],
+    websocket: WebSocket,
 ) -> list[protocol.Envelope]:
     """Generate only for a finalized question the detector judged worth it.
 
@@ -299,7 +338,7 @@ async def _maybe_guide(
     question = await db.get(DetectedQuestion, question_id)
     if question is None:
         return []
-    return await _guide(db, engine, question, None)
+    return await _guide(db, engine, question, None, websocket)
 
 
 async def _guide(
@@ -307,8 +346,9 @@ async def _guide(
     engine: LiveSessionEngine,
     question: DetectedQuestion,
     mode: str | None,
+    websocket: WebSocket,
 ) -> list[protocol.Envelope]:
-    allowed, reason = engine.can_generate()
+    allowed, reason = await engine.can_generate()
     if not allowed:
         return [
             await engine.emit(
@@ -324,13 +364,41 @@ async def _guide(
     bundle = await WorkspaceService(db).context(
         user_id=engine.session.user_id, workspace_id=engine.session.workspace_id
     )
-    result = await CopilotEngine(db).guide(
+    # The fast lane finishes about a second before the full answer. It is written
+    # to the socket the moment it lands, so the candidate reads a direction while
+    # the interviewer is still finishing their sentence instead of watching a
+    # spinner (PRD §20.3, §32.1).
+    #
+    # This one frame is deliberately *not* part of the sequenced event log: it
+    # carries no seq and is never replayed. Persisting it would need the database
+    # session that the generation is already holding, and it is a display hint —
+    # the authoritative content arrives in ``answer.complete`` a moment later.
+    pending: asyncio.Queue[str] = asyncio.Queue()
+
+    async def _flush_direction() -> None:
+        direction = await pending.get()
+        await websocket.send_text(
+            protocol.Envelope(
+                session_id=engine.session.id,
+                type=protocol.ServerEvent.ANSWER_FIELD_COMPLETE,
+                seq=0,
+                payload={
+                    "detected_question_id": str(question.id),
+                    "field": "answer_direction",
+                    "value": direction,
+                },
+            ).model_dump_json()
+        )
+
+    courier = asyncio.create_task(_flush_direction())
+    result = await CopilotEngine(db, on_direction=pending.put_nowait).guide(
         question=question,
         bundle=bundle,
         memory=engine.state.memory,
         response_mode=mode or engine.session.response_mode,
     )
     engine.record_generation()
+    courier.cancel()
 
     return [
         await engine.emit(
@@ -342,9 +410,55 @@ async def _guide(
                 evidence_ids=result.answer.cited_evidence_ids,
                 degraded=result.degraded,
                 latency_ms=result.latency_ms,
+                grounding=result.grounding.to_json(),
             ),
-        )
+        ),
     ]
+
+
+@live_router.get("", response_model=list[LiveSessionResponse])
+async def list_live_sessions(
+    principal: CurrentUser, session: SessionDep, limit: int = 25
+) -> list[LiveSessionResponse]:
+    """Session history (PRD §27)."""
+    rows = list(
+        (
+            await session.execute(
+                select(LiveSession)
+                .where(
+                    LiveSession.user_id == principal.user.id,
+                    LiveSession.deleted_at.is_(None),
+                )
+                .order_by(LiveSession.created_at.desc())
+                .limit(min(limit, 100))
+            )
+        ).scalars()
+    )
+    return [_response(row) for row in rows]
+
+
+@live_router.get("/{session_id}/report", response_model=dict[str, Any])
+async def get_live_report(
+    session_id: uuid.UUID, principal: CurrentUser, session: SessionDep
+) -> dict[str, Any]:
+    """The coverage report. Generated on first read, then served from storage."""
+    report = await LiveReportService(session).generate(
+        user_id=principal.user.id, session_id=session_id
+    )
+    return {
+        "session_id": str(report.session_id),
+        "status": report.status,
+        "summary": report.summary,
+        "overall_score": float(report.overall_score) if report.overall_score else None,
+        "dimension_scores": report.dimension_scores,
+        "coverage": report.coverage,
+        "metrics": report.delivery_metrics,
+        "strengths": report.strengths,
+        "weaknesses": report.weaknesses,
+        "recommendations": report.recommendations,
+        "questions": report.per_question,
+        "rubric_version": report.rubric_version,
+    }
 
 
 @live_router.get("/{session_id}/timeline", response_model=dict[str, Any])

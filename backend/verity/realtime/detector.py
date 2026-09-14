@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from verity.platform.config import settings
+
 # PRD §14.3 signal weights.
 WEIGHT_TRAILING_SILENCE = 0.30
 WEIGHT_TERMINAL_PROSODY = 0.15
@@ -33,13 +35,16 @@ DETECT_THRESHOLD = 0.55
 
 #: Silence that reads as "your turn" without cutting off a thinking pause.
 SILENCE_MS_FOR_BOUNDARY = 600
-#: Continued speech inside this window extends the same question.
-ACCUMULATION_WINDOW_MS = 900
+#: Continued speech inside this window extends the same question. A mid-sentence
+#: thinking pause ("tell me about a time when you… had to ship under pressure")
+#: is common and routinely runs past a second; below that the two halves become
+#: two questions and the candidate is answered on the first half alone.
+ACCUMULATION_WINDOW_MS = settings.question_accumulation_window_ms
 
 #: Above this rate the speaker is rattling through; shorten the window so we do
 #: not merge two questions into one (PRD §35 edge case 16).
 RAPID_SPEECH_WPM = 190
-RAPID_ACCUMULATION_WINDOW_MS = 600
+RAPID_ACCUMULATION_WINDOW_MS = ACCUMULATION_WINDOW_MS * 2 // 3
 
 
 class UtteranceClass(StrEnum):
@@ -310,7 +315,11 @@ def _semantic_completeness(content: str, speech_rate_wpm: float | None) -> float
     score = min(1.0, len(words) / 12)
 
     # Trailing conjunctions and fillers mean the speaker has not finished.
-    if words[-1].lower().rstrip(",") in {
+    # Terminal punctuation is stripped before the check: an STT flush at a
+    # thinking pause comes back as "…when you had to." — the model guessed a
+    # full stop mid-sentence, and trusting it scores the fragment as a complete
+    # question and answers half of what was asked.
+    if words[-1].lower().rstrip(",.!?;:") in {
         "and",
         "or",
         "but",

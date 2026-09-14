@@ -400,3 +400,34 @@ def test_every_envelope_carries_ordering_metadata() -> None:
     assert envelope.v == protocol.PROTOCOL_VERSION
     assert envelope.event_id.startswith("evt_")
     assert envelope.payload["content"] == "Tell me about yourself."
+
+
+# ── Mid-sentence pauses (the interviewer is still talking) ───────────
+
+
+def test_a_pause_fragment_does_not_earn_a_generation() -> None:
+    """Whisper punctuates a thinking pause with a full stop it invented.
+
+    Trusting that period scores half a question as a whole one, and the
+    candidate gets answered on the first half of what was asked.
+    """
+    half = detect(
+        content="So tell me about a time when you had to.",
+        silence_ms=700,
+        endpointed=True,
+    )
+    assert not half.should_generate
+
+    whole = detect(
+        content="So tell me about a time when you had to handle a difficult stakeholder.",
+        silence_ms=700,
+        endpointed=True,
+    )
+    assert whole.should_generate
+
+
+def test_the_window_tolerates_a_real_thinking_pause() -> None:
+    """The STT flush spends 700 ms before this window opens."""
+    assert accumulation_window_ms(None) + 700 >= 2_000
+    # A fast talker still gets a shorter window, or two questions merge into one.
+    assert accumulation_window_ms(250) < accumulation_window_ms(None)

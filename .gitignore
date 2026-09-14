@@ -52,3 +52,10 @@ desktop/src-tauri/gen/schemas/
 *.msi
 *.AppImage
 Verity-Desktop-Standalone.zip
+
+# Rust build output for the standalone audio diagnostic (117 MB, rebuilt by CI)
+desktop/audio-probe/target/
+
+# Local scratch archives
+Archive.zip
+verity.zip

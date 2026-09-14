@@ -212,6 +212,9 @@ class AnswerCompletePayload(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
     degraded: bool = False
     latency_ms: dict[str, float] = Field(default_factory=dict)
+    #: Validator output, so the client can mark unverified names and figures in
+    #: the spoken answer instead of the user reading them out as fact.
+    grounding: dict[str, Any] = Field(default_factory=dict)
 
 
 class WarningPayload(BaseModel):

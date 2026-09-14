@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any
 
+from verity.platform.prompt_safety import INJECTION_GUARD, untrusted
 from verity.realtime.memory import ConversationMemory
 
 #: Realtime budget for the whole prompt, excluding reserved output (§20.4).
@@ -119,7 +120,7 @@ def assemble(
     candidates: list[ContextSection] = []
 
     candidates.append(
-        ContextSection(Priority.CURRENT_QUESTION, "Current question", question.strip())
+        ContextSection(Priority.CURRENT_QUESTION, "Current question", untrusted(question.strip()))
     )
 
     recent = memory.recent_turns(3)
@@ -128,7 +129,7 @@ def assemble(
             ContextSection(
                 Priority.RECENT_CONVERSATION,
                 "Recent conversation",
-                "\n".join(f"{t.role}: {t.content}" for t in recent),
+                untrusted("\n".join(f"{t.role}: {t.content}" for t in recent)),
             )
         )
 
@@ -235,10 +236,38 @@ def static_prefix(bundle_opportunity: dict[str, Any], response_mode: str) -> str
     it on every generation rather than only the first.
     """
     return (
-        "You are assisting a candidate during a live interview.\n"
+        "You are assisting a candidate during a live interview. The candidate is "
+        "reading your output on a second screen while the interviewer waits, so "
+        "every word has to be usable at a glance.\n"
         f"Role: {bundle_opportunity.get('role_title')} at "
         f"{bundle_opportunity.get('company_name')}.\n"
         f"Response mode: {response_mode}.\n"
+        "\n"
+        "Fields:\n"
+        "- spoken_answer: THE ANSWER ITSELF — the exact words the candidate says "
+        "next, written in their own first-person voice, ready to read aloud "
+        "verbatim. This is the main output; everything else supports it.\n"
+        "- answer_direction: the same answer compressed to one line, for a "
+        "candidate who only has time to glance.\n"
+        "- key_points: the specific things the spoken answer covers, one short "
+        "line each, so the candidate can improvise from them instead of reading.\n"
+        "- structure: the shape the answer follows, e.g. "
+        "'Situation → Action → Result' for a behavioural question or "
+        "'Constraints → Approach → Trade-offs' for a technical one. Always set it.\n"
+        "\n"
+        "How to write spoken_answer:\n"
+        "- First person, present tense, contractions. Write how a person talks, "
+        "not how a document reads. No headings, no bullets, no markdown.\n"
+        "- Open with the substance in the first six words. Never 'That is a great "
+        "question', never 'I would say that', never restating what was asked.\n"
+        "- Use the candidate's real companies, numbers and project names from the "
+        "evidence. A specific detail is the whole difference between an answer "
+        "that lands and one that sounds generic.\n"
+        "- Never narrate the advice ('you should mention…'). Say the thing.\n"
+        "- End on a result or a concrete close, not a trailing thought.\n"
+        "- If the evidence does not cover something, speak only to what it does "
+        "cover and let key_points flag the gap. Do not fill it with an invention.\n"
+        "\n" + INJECTION_GUARD + "\n"
         "Never invent an employer, project, metric or achievement. Only facts present "
         "in the supplied evidence may be marked as candidate_fact, and each must cite "
         "the evidence id it came from. If evidence is missing, say so and give a "

@@ -1,0 +1,165 @@
+name: Build
+
+# Builds installers on real Windows and macOS machines. Run it from the
+# Actions tab (or on any push) and download the result from the run's
+# Artifacts section - no local toolchain required.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Format and lint
+    # Not ubuntu-latest: clippy has to compile Tauri's own dependency tree to
+    # get type information even with --no-deps, and that tree needs
+    # GTK/WebKit system libraries Linux does not have preinstalled. Windows
+    # already carries everything the other jobs need, so lint rides along
+    # there for free instead of installing a second toolchain.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add rustfmt clippy
+      - name: Check formatting
+        working-directory: desktop/src-tauri
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: rustc --version && cargo --version
+      # --nocapture so the real device enumeration prints what this OS sees.
+      # That is the only place CI can show whether the Windows loopback path
+      # actually surfaces output devices.
+      - name: Run tests
+        working-directory: desktop/src-tauri
+        run: cargo test -- --nocapture
+
+  build:
+    name: Installer (${{ matrix.os }})
+    needs: [test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: verity-windows
+            paths: |
+              desktop/src-tauri/target/release/bundle/nsis/*.exe
+              desktop/src-tauri/target/release/bundle/msi/*.msi
+              dist-probe/*
+          - os: macos-latest
+            artifact: verity-macos
+            paths: |
+              desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              dist-probe/*
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the dependency build, which dominates a cold run.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked --version "^2"
+
+      - name: Build installer
+        working-directory: desktop/src-tauri
+        run: cargo tauri build
+
+
+      - name: Build audio probe
+        run: cargo build --release --manifest-path desktop/audio-probe/Cargo.toml
+
+      - name: Stage probe next to the installers
+        shell: bash
+        run: |
+          mkdir -p dist-probe
+          # Only the executable: the sibling .d and .pdb files are build debris.
+          cp desktop/audio-probe/target/release/audio-probe.exe dist-probe/ 2>/dev/null \
+            || cp desktop/audio-probe/target/release/audio-probe dist-probe/
+          ls -l dist-probe
+
+      - name: List what was bundled
+        shell: bash
+        run: ls -R desktop/src-tauri/target/release/bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+
+  # Republishes the "latest" GitHub Release with every successful build on
+  # main, so there is always one permanent, discoverable link to download
+  # from - Actions artifacts expire (90 days) and need a GitHub login to
+  # even find; a Release does neither. Only runs after both installer jobs
+  # in the matrix above succeed, and only for real pushes to main (not
+  # PRs) or a manual run explicitly targeting main.
+  release:
+    name: Publish latest release
+    needs: [build]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten and clearly name the release assets
+        shell: bash
+        run: |
+          mkdir -p release
+          cp artifacts/verity-windows/desktop/src-tauri/target/release/bundle/nsis/*.exe release/
+          cp artifacts/verity-windows/desktop/src-tauri/target/release/bundle/msi/*.msi release/
+          cp artifacts/verity-macos/desktop/src-tauri/target/release/bundle/dmg/*.dmg release/
+          cp artifacts/verity-windows/dist-probe/audio-probe.exe release/audio-probe-windows.exe
+          cp artifacts/verity-macos/dist-probe/audio-probe release/audio-probe-macos
+          ls -la release
+
+      - name: Republish the "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete-then-recreate, not upload --clobber: a version bump can
+          # change an asset's filename (Verity_0.2.0_... -> 0.3.0_...), and
+          # --clobber only overwrites files with matching names, which would
+          # leave old, stale, differently-named installers attached forever.
+          # --cleanup-tag also removes the old "latest" tag so the new one
+          # created below points at this commit, not a stale one.
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create latest release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Verity Desktop — latest build" \
+            --target main \
+            --notes "Built automatically from commit $(git rev-parse --short HEAD) on \`main\`. Replaced on every new build that lands here — see the [commit history](https://github.com/$GITHUB_REPOSITORY/commits/main) for what changed since your last download.
+
+          **Windows**: run \`Verity_*_x64-setup.exe\` (or the \`.msi\`). SmartScreen will warn it's unsigned — More info → Run anyway.
+
+          **macOS (Apple Silicon)**: open \`Verity_*_aarch64.dmg\`, drag Verity to Applications. Unsigned — right-click the app → Open the first time.
+
+          \`audio-probe-windows.exe\` / \`audio-probe-macos\`: a standalone audio-capture diagnostic, no API key or network needed — see the README's \"When nothing is being transcribed\" section."

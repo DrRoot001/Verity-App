@@ -74,8 +74,28 @@
             <option value="pt">Portuguese</option>
             <option value="hi">Hindi</option>
           </select>
-          <label for="chat-model">Groq answer model</label>
-          <input id="chat-model" value="allam-2-7b" />
+
+          <label for="chat-provider">Answer provider</label>
+          <select id="chat-provider">
+            <option value="groq">Groq</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="bedrock">Amazon Bedrock</option>
+          </select>
+          <p class="hint">Transcription always uses the Groq keys above — Whisper is a Groq-only step. This choice only picks who writes the suggested answer.</p>
+
+          <div id="chat-keys-row" class="hidden">
+            <label for="chat-api-keys">Answer provider API keys</label>
+            <textarea id="chat-api-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
+            <div class="inline-row">
+              <p id="chat-key-hint" class="hint">Stored only in this machine's local Verity preferences.</p>
+              <button id="test-chat-btn" class="small-button" type="button">Test connection</button>
+            </div>
+          </div>
+
+          <label for="chat-model">Answer model</label>
+          <input id="chat-model" placeholder="Model name for the selected provider" />
         </div>
       </details>
 
@@ -109,6 +129,8 @@
       <div class="guidance card answer-card">
         <p class="label">Suggested answer</p>
         <p id="direction" class="direction">Your answer will stream here as soon as a question is detected.</p>
+        <p id="answer" class="answer"></p>
+        <p id="unverified" class="unverified"></p>
         <ul id="points"></ul>
         <p id="structure" class="structure"></p>
       </div>
@@ -122,6 +144,17 @@
       <div class="transcript-row">
         <p id="heard" class="heard">Listening for audio…</p>
       </div>
+
+      <section class="thread card">
+        <div class="thread-header">
+          <p class="label">Conversation</p>
+          <span id="thread-count" class="thread-count"></span>
+        </div>
+        <div id="thread-list" class="thread-list">
+          <p id="thread-empty" class="thread-empty">Questions and answers will collect here as the interview goes, so you can scroll back through what was already asked.</p>
+        </div>
+      </section>
+
       <p id="hud-error" class="error" role="alert"></p>
     </section>
 

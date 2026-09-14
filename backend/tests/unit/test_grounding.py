@@ -8,6 +8,7 @@ a metric gets its claim downgraded to guidance rather than rendered as fact.
 from __future__ import annotations
 
 from verity.ai.answers import (
+    MODES,
     Answer,
     ClaimType,
     KeyPoint,
@@ -147,6 +148,44 @@ def test_no_evidence_yields_a_framework_and_never_a_fact() -> None:
     assert answer.cited_evidence_ids == []
 
 
+# ── The spoken answer (the words the candidate reads aloud) ──────────
+
+
+def test_spoken_answer_is_cut_on_a_sentence_boundary() -> None:
+    """Mid-clause is unspeakable — the user is reading this out loud."""
+    answer = _answer(KeyPoint("A point", ClaimType.GUIDANCE))
+    answer.spoken_answer = "One. Two. Three. Four. Five. Six. Seven. Eight."
+    enforce_mode(answer, ResponseMode.CONCISE)
+
+    assert answer.spoken_answer == "One. Two."
+
+
+def test_talking_points_mode_has_no_spoken_answer() -> None:
+    answer = _answer(KeyPoint("A point", ClaimType.GUIDANCE))
+    answer.spoken_answer = "Something to say."
+    enforce_mode(answer, ResponseMode.TALKING_POINTS)
+
+    assert answer.spoken_answer == ""
+
+
+def test_an_invented_figure_in_the_spoken_answer_is_flagged() -> None:
+    answer = _answer(KeyPoint("A point", ClaimType.GUIDANCE))
+    answer.spoken_answer = "I cut deploy time by 87% at Globex."
+    report = validate_grounding(answer, EVIDENCE)
+
+    assert "87%" in report.unverified
+    assert "Globex" in report.unverified
+
+
+def test_the_role_and_question_are_speakable_without_being_evidence() -> None:
+    """Otherwise every correct answer trips the flag on the company name."""
+    answer = _answer(KeyPoint("A point", ClaimType.GUIDANCE))
+    answer.spoken_answer = "At Northwind I owned the deployment pipeline."
+    report = validate_grounding(answer, EVIDENCE, extra_corpus="Role: SRE at Initech")
+
+    assert report.unverified == []
+
+
 # ── Mode enforcement (FR-COP-002) ────────────────────────────────────
 
 
@@ -155,8 +194,9 @@ def test_concise_mode_caps_points_and_words() -> None:
     answer.answer_direction = "One. Two. Three. Four."
     enforce_mode(answer, ResponseMode.CONCISE)
 
-    assert len(answer.key_points) <= 3
-    assert all(len(p.text.split()) <= 13 for p in answer.key_points)
+    cap = MODES[ResponseMode.CONCISE]
+    assert len(answer.key_points) <= cap.max_points
+    assert all(len(p.text.split()) <= cap.max_words_per_point + 1 for p in answer.key_points)
     assert answer.answer_direction.count(".") == 1
 
 
@@ -244,3 +284,54 @@ def test_cited_evidence_is_deduplicated_in_order() -> None:
         KeyPoint("B", ClaimType.CANDIDATE_FACT, ["exp_1", "ach_1"]),
     )
     assert answer.cited_evidence_ids == ["ach_1", "exp_1"]
+
+
+# ── Answer usability (PRD §14.5) ─────────────────────────────────────
+
+
+def test_a_direction_that_restates_the_question_is_dropped() -> None:
+    """The candidate just heard the question; echoing it wastes the top line."""
+    question = "Tell me about a time you led incident response on a production outage."
+    answer = parse_answer(
+        {
+            "answer_direction": "Tell me about a time you led incident response on an outage.",
+            "key_points": [{"text": "Reduced MTTR to 9 minutes", "claim_type": "guidance"}],
+        },
+        [],
+        question=question,
+    )
+
+    assert answer.answer_direction == ""
+
+
+def test_a_real_direction_survives() -> None:
+    question = "Tell me about a time you led incident response on a production outage."
+    answer = parse_answer(
+        {
+            "answer_direction": "Open with the payments outage you ran point on last year.",
+            "key_points": [{"text": "Rolled back, then cached", "claim_type": "guidance"}],
+        },
+        [],
+        question=question,
+    )
+
+    assert answer.answer_direction.startswith("Open with the payments outage")
+
+
+def test_a_mode_that_wants_structure_always_gets_one() -> None:
+    """A candidate who has gone blank needs a shape more than anything else."""
+    answer = enforce_mode(
+        Answer(answer_direction="Start with the outage.", key_points=[], structure=None),
+        ResponseMode.STAR,
+    )
+
+    assert answer.structure == "Situation → Task → Action → Result"
+
+
+def test_a_mode_that_suppresses_structure_still_suppresses_it() -> None:
+    answer = enforce_mode(
+        Answer(answer_direction="", key_points=[], structure="Situation → Result"),
+        ResponseMode.TALKING_POINTS,
+    )
+
+    assert answer.structure is None

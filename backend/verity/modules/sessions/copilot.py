@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -75,10 +76,14 @@ class CopilotEngine:
         db: AsyncSession,
         *,
         gateway: AIGateway | None = None,
+        on_direction: Callable[[str], None] | None = None,
     ) -> None:
         self._db = db
         self._gateway = gateway or build_gateway()
         self._retrieval = GraphRetrievalService(db, build_embedding_provider())
+        #: Called with the fast-lane direction the instant it is ready, so the
+        #: transport can put it on screen without waiting for the full answer.
+        self._on_direction = on_direction
 
     async def guide(
         self,
@@ -131,13 +136,19 @@ class CopilotEngine:
             direction, main, degraded_main = await self._race_lanes(prefix, context.render(), mode)
         timings["generation"] = (time.perf_counter() - generation_started) * 1000
 
-        answer = parse_answer(main, evidence)
-        if direction and (not answer.answer_direction or len(direction) > 12):
-            # The fast lane wrote what the user already read; keep it unless the
-            # main model produced something and the fast lane produced nothing.
-            answer.answer_direction = answer.answer_direction or direction
+        answer = parse_answer(main, evidence, question=question.content)
+        # The fast lane already put its line on screen; keep it rather than
+        # swapping the text under the reader, unless the main lane has one too.
+        answer.answer_direction = answer.answer_direction or direction
 
-        grounding = validate_grounding(answer, evidence)
+        grounding = validate_grounding(
+            answer,
+            evidence,
+            # The role, the company and the question itself are legitimately
+            # speakable without being "evidence" — counting them as fabrications
+            # would flag every correct answer.
+            extra_corpus=f"{prefix} {question.content}",
+        )
         answer = enforce_mode(answer, mode)
 
         # Never recommend a story the candidate already told (FR-COP-010).
@@ -175,9 +186,26 @@ class CopilotEngine:
     async def _race_lanes(
         self, prefix: str, context: str, mode: str
     ) -> tuple[str, dict[str, Any], bool]:
-        """Run both lanes concurrently and return (direction, answer, degraded)."""
+        """Run both lanes concurrently and return (direction, answer, degraded).
+
+        ``on_direction`` fires as soon as the fast lane lands — roughly a second
+        before the main answer. In a live interview that gap is the difference
+        between reading something while the interviewer is still finishing their
+        sentence and staring at a spinner.
+        """
         fast = asyncio.create_task(self._fast_lane(prefix, context))
         main = asyncio.create_task(self._main_lane(prefix, context, mode))
+
+        if self._on_direction is not None:
+            notify = self._on_direction
+
+            def _publish(task: asyncio.Task[str]) -> None:
+                if task.cancelled():
+                    return
+                if task.exception() is None and task.result().strip():
+                    notify(task.result().strip())
+
+            fast.add_done_callback(_publish)
 
         direction = ""
         degraded = False
@@ -188,7 +216,7 @@ class CopilotEngine:
             # evidence is still genuinely useful (PRD §20.3 degraded mode).
             degraded = True
             log.warning("main_lane_failed", error=type(exc).__name__)
-            answer = {"answer_direction": "", "key_points": []}
+            answer = {"spoken_answer": "", "answer_direction": "", "key_points": []}
 
         try:
             direction = await asyncio.wait_for(
@@ -208,8 +236,8 @@ class CopilotEngine:
                 Message(
                     role="user",
                     content=(
-                        f"{context}\n\nIn one or two sentences, state the direction this answer "
-                        "should take. No preamble."
+                        f"{context}\n\nWrite the first sentence the candidate should say out "
+                        "loud, in their own voice. Just the sentence — no preamble, no advice."
                     ),
                 ),
             ],
@@ -228,14 +256,19 @@ class CopilotEngine:
                 Message(
                     role="user",
                     content=(
-                        f"{context}\n\nProduce guidance in `{mode}` mode. Mark a key point as "
-                        "candidate_fact only when the supplied evidence supports it, and cite "
-                        "the evidence ids. Otherwise use guidance or general_knowledge."
+                        f"{context}\n\nAnswer in `{mode}` mode. Write spoken_answer as the words "
+                        "the candidate says next, in their own voice, using their real details "
+                        "from the evidence above. Mark a key point as candidate_fact only when "
+                        "that evidence supports it, and cite the evidence ids. Otherwise use "
+                        "guidance or general_knowledge."
                     ),
                 ),
             ],
             json_schema=ANSWER_SCHEMA,
-            max_output_tokens=700,
+            # Room for a full spoken answer (detailed mode runs ~7 sentences)
+            # plus the key points and JSON overhead. Server-side caps still trim
+            # whatever overshoots the mode.
+            max_output_tokens=1_000,
             temperature=0.35,
             timeout_seconds=MAIN_LANE_TIMEOUT,
             feature="copilot_answer",

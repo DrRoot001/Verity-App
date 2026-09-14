@@ -90,14 +90,25 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""
 
     # ── AI providers (PRD §20.2) ─────────────────────────────────────
-    llm_primary_provider: str = "stub"
+    llm_primary_provider: Literal["stub", "anthropic", "groq"] = "stub"
     anthropic_api_key: SecretStr = SecretStr("")
+    groq_api_key: SecretStr = SecretStr("")
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_fast_model: str = "llama-3.1-8b-instant"
+    groq_realtime_model: str = "openai/gpt-oss-20b"
+    groq_primary_model: str = "openai/gpt-oss-120b"
     openai_api_key: SecretStr = SecretStr("")
     embedding_provider: str = "local"
     embedding_dimensions: int = 1536
 
     # ── STT (PRD §23) ────────────────────────────────────────────────
     stt_primary_provider: str = "null"
+    #: How long an interviewer may pause mid-sentence before the next words are
+    #: treated as a new question instead of the rest of this one. Speech pacing
+    #: is a property of the person and the room, so it is tunable without a
+    #: deploy. The STT flush (700 ms) is already spent before this window opens,
+    #: so the tolerated pause is roughly this value plus that.
+    question_accumulation_window_ms: int = 2_000
 
     # ── Cost controls (PRD §33) ──────────────────────────────────────
     ai_daily_budget_usd: float = 250.0
@@ -121,6 +132,11 @@ class Settings(BaseSettings):
     trace_sample_ratio: float = 1.0
 
     # ── Rate limiting ────────────────────────────────────────────────
+    #: Grace period before an account deletion executes (PRD FR-AUTH-009).
+    #: Configurable so a test or a support-driven immediate erasure does not
+    #: need a second code path.
+    deletion_grace_days: int = 7
+
     rate_limit_enabled: bool = True
 
     @field_validator("log_level")
