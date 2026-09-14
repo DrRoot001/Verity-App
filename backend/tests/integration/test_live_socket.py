@@ -166,9 +166,9 @@ def test_a_ticket_cannot_be_replayed(live: LiveClient) -> None:
 
     # starlette raises when the server closes with 4401 before accepting.
     with (
-        pytest.raises(Exception),
+        pytest.raises(Exception),  # noqa: B017
         live.client.websocket_connect(f"/v1/rt/live/{session_id}?ticket={ticket}"),
-    ):  # noqa: B017
+    ):
         pass
 
 
@@ -180,9 +180,9 @@ def test_a_ticket_is_bound_to_its_session(live: LiveClient) -> None:
 
     # starlette raises when the server closes with 4401 before accepting.
     with (
-        pytest.raises(Exception),
+        pytest.raises(Exception),  # noqa: B017
         live.client.websocket_connect(f"/v1/rt/live/{second_id}?ticket={ticket}"),
-    ):  # noqa: B017
+    ):
         pass
 
 
@@ -368,4 +368,101 @@ def test_another_users_session_is_not_reachable(api_client: Any) -> None:
 
     intruder = LiveClient(api_client)
     response = intruder.client.get(f"/v1/live-sessions/{session_id}", headers=intruder.headers)
+    assert response.status_code == 404
+
+
+# ── Report and the loop (PRD §27, Phase 10) ──────────────────────────
+
+
+def test_a_live_session_produces_a_coverage_report(live: LiveClient) -> None:
+    """The report says what was covered, not what score the candidate got."""
+    workspace_id = live.prepare_workspace()
+    session_id, ticket = live.start_session(workspace_id)
+
+    with live.client.websocket_connect(f"/v1/rt/live/{session_id}?ticket={ticket}") as ws:
+        _send(ws, session_id, protocol.ClientEvent.SESSION_START, {"workspace_id": workspace_id})
+        _drain(ws, session_id)
+        _send(
+            ws,
+            session_id,
+            protocol.ClientEvent.QUESTION_MANUAL,
+            {"content": "How have you operated Kubernetes in production?"},
+        )
+        _drain(ws, session_id)
+
+    report = live.client.get(f"/v1/live-sessions/{session_id}/report", headers=live.headers).json()
+
+    assert report["status"] == "ready"
+    assert report["metrics"]["questions_detected"] >= 1
+
+    # The JD requires Kubernetes and the question asked about it.
+    probed = [c for c in report["coverage"] if c["probed"]]
+    assert any("kubernetes" in c["requirement"].lower() for c in probed)
+
+
+def test_an_unbacked_requirement_becomes_a_prep_task(live: LiveClient) -> None:
+    """AC-WS-002: the loop closes without the user relaying anything."""
+    workspace_id = live.prepare_workspace()
+    session_id, ticket = live.start_session(workspace_id)
+
+    with live.client.websocket_connect(f"/v1/rt/live/{session_id}?ticket={ticket}") as ws:
+        _send(ws, session_id, protocol.ClientEvent.SESSION_START, {"workspace_id": workspace_id})
+        _drain(ws, session_id)
+        _send(
+            ws,
+            session_id,
+            protocol.ClientEvent.QUESTION_MANUAL,
+            {"content": "Tell me about leading incident response."},
+        )
+        _drain(ws, session_id)
+
+    report = live.client.get(f"/v1/live-sessions/{session_id}/report", headers=live.headers).json()
+
+    assert report["weaknesses"], "an unbacked requirement should be measured"
+
+    plan = live.client.post(
+        f"/v1/preparation/plans/generate?workspace_id={workspace_id}",
+        headers=live.headers,
+    ).json()
+    titles = " ".join(t["title"].lower() for t in plan["tasks"])
+
+    theme = report["weaknesses"][0]["theme"].lower()
+    assert theme[:15] in titles, "a measured gap must reach the next plan"
+
+
+def test_the_report_is_generated_once(live: LiveClient) -> None:
+    workspace_id = live.prepare_workspace()
+    session_id, ticket = live.start_session(workspace_id)
+
+    with live.client.websocket_connect(f"/v1/rt/live/{session_id}?ticket={ticket}") as ws:
+        _send(ws, session_id, protocol.ClientEvent.SESSION_START, {"workspace_id": workspace_id})
+        _drain(ws, session_id)
+        _send(ws, session_id, protocol.ClientEvent.QUESTION_MANUAL, {"content": "Why us?"})
+        _drain(ws, session_id)
+
+    first = live.client.get(f"/v1/live-sessions/{session_id}/report", headers=live.headers).json()
+    second = live.client.get(f"/v1/live-sessions/{session_id}/report", headers=live.headers).json()
+
+    assert first == second
+
+
+def test_session_history_lists_only_my_sessions(live: LiveClient, api_client: Any) -> None:
+    workspace_id = live.prepare_workspace()
+    mine, _ = live.start_session(workspace_id)
+
+    stranger = LiveClient(api_client)
+    history = stranger.client.get("/v1/live-sessions", headers=stranger.headers).json()
+
+    assert mine not in [s["id"] for s in history]
+
+
+def test_another_users_report_is_not_reachable(live: LiveClient, api_client: Any) -> None:
+    workspace_id = live.prepare_workspace()
+    session_id, _ = live.start_session(workspace_id)
+
+    intruder = LiveClient(api_client)
+    response = intruder.client.get(
+        f"/v1/live-sessions/{session_id}/report", headers=intruder.headers
+    )
+
     assert response.status_code == 404

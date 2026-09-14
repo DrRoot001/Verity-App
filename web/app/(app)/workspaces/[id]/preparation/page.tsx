@@ -23,6 +23,7 @@ import {
   type PrepTask,
 } from "@/features/workspace/preparation";
 import { ApiError } from "@/lib/api/client";
+import { WorkspaceNav } from "@/features/workspace/nav";
 
 const PRIORITY_TONE = {
   critical: "critical",
@@ -93,7 +94,10 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
       <Empty
         title="No preparation plan yet"
         description="Verity turns the gaps between your confirmed experience and this role's requirements into ranked, launchable work."
-        action={{ label: busy ? "Generating…" : "Generate plan", onClick: () => void regenerate() }}
+        action={{
+          label: busy ? "Generating…" : "Generate plan",
+          onClick: () => void regenerate(),
+        }}
       />
     );
   }
@@ -103,6 +107,7 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="space-y-8">
+      <WorkspaceNav id={id} />
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl">Preparation</h1>
@@ -128,7 +133,10 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
           </div>
           <ul className="space-y-2.5 border-t border-[var(--color-border-subtle)] pt-4">
             {plan.readiness.drivers.map((driver) => (
-              <li key={driver.factor} className="flex items-start justify-between gap-4 text-sm">
+              <li
+                key={driver.factor}
+                className="flex items-start justify-between gap-4 text-sm"
+              >
                 <div className="min-w-0">
                   <p className="font-medium capitalize">{driver.factor.replace(/_/g, " ")}</p>
                   <p className="text-xs text-[var(--color-text-muted)]">{driver.detail}</p>
@@ -147,7 +155,10 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
           What to do next ({open.length})
         </h2>
         {open.length === 0 ? (
-          <Empty title="Everything is done" description="Regenerate the plan if your context changed." />
+          <Empty
+            title="Everything is done"
+            description="Regenerate the plan if your context changed."
+          />
         ) : (
           <Card>
             <CardBody>
@@ -158,7 +169,9 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
                       <div className="space-y-1">
                         <p className="font-medium">{task.title}</p>
                         {task.detail ? (
-                          <p className="text-sm text-[var(--color-text-secondary)]">{task.detail}</p>
+                          <p className="text-sm text-[var(--color-text-secondary)]">
+                            {task.detail}
+                          </p>
                         ) : null}
                         <p className="text-xs text-[var(--color-text-muted)]">
                           <span className="numeric">{task.estimated_minutes} min</span>
@@ -184,18 +197,20 @@ export default function PreparationPage({ params }: { params: Promise<{ id: stri
 
                     {expanded === task.id ? (
                       <dl className="grid gap-1 rounded-[var(--radius-control)] bg-[var(--color-raised)] p-3 text-xs sm:grid-cols-2">
-                        {Object.entries(task.score_breakdown.factors ?? {}).map(([factor, value]) => (
-                          <div key={factor} className="flex justify-between gap-2">
-                            <dt className="text-[var(--color-text-secondary)]">
-                              {factor.replace(/_/g, " ")}
-                            </dt>
-                            <dd>
-                              {value.toFixed(2)} ×{" "}
-                              {(task.score_breakdown.weights?.[factor] ?? 0).toFixed(2)} ={" "}
-                              {(task.score_breakdown.contributions?.[factor] ?? 0).toFixed(3)}
-                            </dd>
-                          </div>
-                        ))}
+                        {Object.entries(task.score_breakdown.factors ?? {}).map(
+                          ([factor, value]) => (
+                            <div key={factor} className="flex justify-between gap-2">
+                              <dt className="text-[var(--color-text-secondary)]">
+                                {factor.replace(/_/g, " ")}
+                              </dt>
+                              <dd>
+                                {value.toFixed(2)} ×{" "}
+                                {(task.score_breakdown.weights?.[factor] ?? 0).toFixed(2)} ={" "}
+                                {(task.score_breakdown.contributions?.[factor] ?? 0).toFixed(3)}
+                              </dd>
+                            </div>
+                          ),
+                        )}
                         <div className="flex justify-between gap-2 font-medium sm:col-span-2">
                           <dt>Total</dt>
                           <dd>{(task.score_breakdown.total ?? 0).toFixed(3)}</dd>

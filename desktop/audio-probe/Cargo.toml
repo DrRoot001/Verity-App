@@ -1,0 +1,14 @@
+[package]
+name = "audio-probe"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone audio-capture diagnostic for Verity Desktop"
+
+# Deliberately only cpal: the probe exists to test the capture primitive
+# itself, so it must not depend on the app's own wrapper around it.
+[dependencies]
+cpal = "0.15"
+
+[[bin]]
+name = "audio-probe"
+path = "src/main.rs"

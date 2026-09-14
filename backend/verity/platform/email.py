@@ -97,6 +97,13 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "interview workspace:\n\n{link}\n\nThis link expires in 24 hours. "
         "If you didn't create an account, you can ignore this message.",
     ),
+    "deletion_complete": (
+        "Your Verity account has been deleted",
+        "Your account and all of its data have been permanently deleted.\n\n"
+        "Stores erased: {stores}\n\n"
+        "Nothing further is held about you. This message is the last one you "
+        "will receive from us.",
+    ),
     "password_reset": (
         "Reset your Verity password",
         "We received a request to reset your password.\n\n{link}\n\n"

@@ -9,6 +9,11 @@ import pytest
 os.environ.setdefault("VERITY_ENV", "local")
 os.environ.setdefault("VERITY_LOG_FORMAT", "console")
 os.environ.setdefault("VERITY_LOG_LEVEL", "WARNING")
+# Test behavior must be deterministic and must never spend developer credits,
+# even when the local .env contains a live provider key.
+os.environ["VERITY_LLM_PRIMARY_PROVIDER"] = "stub"
+os.environ["VERITY_GROQ_API_KEY"] = ""
+os.environ["VERITY_ANTHROPIC_API_KEY"] = ""
 # Argon2 at production cost (64 MiB x3) makes an auth suite take minutes. The
 # parameters are configuration, so lowering them here exercises the identical
 # code path without weakening the deployed setting.

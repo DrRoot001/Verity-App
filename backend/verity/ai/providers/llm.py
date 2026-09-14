@@ -1,11 +1,11 @@
 """LLM providers (PRD §20.2).
 
-``AnthropicProvider`` speaks the Messages API over HTTP rather than through the
-vendor SDK, which keeps the dependency surface small and the wire format
-explicit. ``DeterministicProvider`` is a real, seeded implementation used when
-no key is configured: it produces schema-valid, reproducible output so the
-orchestration, validation, metering and fallback paths are all exercisable
-offline. It is never routed in production — ``routing.py`` refuses it there.
+``AnthropicProvider`` and ``GroqProvider`` speak their HTTP APIs directly rather
+than through vendor SDKs, which keeps the dependency surface small and the wire
+formats explicit. ``DeterministicProvider`` is a real, seeded implementation
+used when no key is configured: it produces schema-valid, reproducible output
+so orchestration, validation, metering and fallback paths remain exercisable
+offline. It is never routed in production — ``gateway.py`` refuses it there.
 """
 
 from __future__ import annotations
@@ -154,6 +154,175 @@ class AnthropicProvider:
                         yield Delta(text="", is_final=True)
         except httpx.HTTPError as exc:
             raise AppError(ErrorCode.AI_PROVIDER_UNAVAILABLE, "The model stream failed.") from exc
+
+
+class GroqProvider:
+    """Groq's OpenAI-compatible Chat Completions API.
+
+    Structured requests use JSON Object mode because Verity's schemas include
+    optional fields that are not valid Groq strict-mode schemas. Verity parses
+    and validates required fields in :class:`AIGateway` after generation.
+    """
+
+    name = "groq"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str = "https://api.groq.com/openai/v1",
+    ) -> None:
+        if not api_key:
+            raise AppError.internal("Groq provider is missing its API key.")
+        self._api_key = api_key
+        self._base_url = base_url.rstrip("/")
+        self.model = model
+
+    def capabilities(self) -> Capabilities:
+        return Capabilities(
+            streaming=True, json_schema=True, tools=True, max_context_tokens=131_072
+        )
+
+    def _payload(self, request: CompletionRequest) -> dict[str, Any]:
+        messages = [
+            {"role": message.role, "content": message.content} for message in request.messages
+        ]
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "max_completion_tokens": request.max_output_tokens,
+            "temperature": request.temperature,
+        }
+        if request.json_schema:
+            schema_json = json.dumps(request.json_schema, separators=(",", ":"))
+            messages.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": (
+                        f"Return only a valid JSON object matching this JSON Schema: {schema_json}"
+                    ),
+                },
+            )
+            if self.model.startswith("openai/gpt-oss-"):
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "verity_response",
+                        "strict": False,
+                        "schema": request.json_schema,
+                    },
+                }
+            else:
+                payload["response_format"] = {"type": "json_object"}
+        return payload
+
+    @property
+    def _headers(self) -> dict[str, str]:
+        return {
+            "authorization": f"Bearer {self._api_key}",
+            "content-type": "application/json",
+        }
+
+    async def complete(self, request: CompletionRequest) -> Completion:
+        try:
+            async with httpx.AsyncClient(timeout=request.timeout_seconds) as client:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    json=self._payload(request),
+                    headers=self._headers,
+                )
+        except httpx.TimeoutException as exc:
+            raise AppError(ErrorCode.AI_TIMEOUT, "The Groq model timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise AppError(
+                ErrorCode.AI_PROVIDER_UNAVAILABLE, "The Groq API is unreachable."
+            ) from exc
+
+        _raise_for_groq_status(response)
+        body = response.json()
+        choices = body.get("choices", [])
+        if not choices:
+            raise AppError(
+                ErrorCode.AI_PROVIDER_UNAVAILABLE,
+                "The Groq API returned no completion choice.",
+            )
+
+        choice = choices[0]
+        usage = body.get("usage", {})
+        return Completion(
+            text=choice.get("message", {}).get("content") or "",
+            usage=Usage(
+                input_tokens=int(usage.get("prompt_tokens", 0)),
+                output_tokens=int(usage.get("completion_tokens", 0)),
+                cached_input_tokens=int(
+                    usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+                ),
+            ),
+            model=body.get("model", self.model),
+            provider=self.name,
+            finish_reason=choice.get("finish_reason", "stop"),
+            raw={"id": body.get("id"), "system_fingerprint": body.get("system_fingerprint")},
+        )
+
+    async def stream(self, request: CompletionRequest) -> AsyncIterator[Delta]:
+        payload = {
+            **self._payload(request),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        usage: Usage | None = None
+        try:
+            async with (
+                httpx.AsyncClient(timeout=request.timeout_seconds) as client,
+                client.stream(
+                    "POST",
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=self._headers,
+                ) as response,
+            ):
+                _raise_for_groq_status(response)
+                async for line in response.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:]
+                    if data == "[DONE]":
+                        yield Delta(text="", is_final=True, usage=usage)
+                        return
+                    event = json.loads(data)
+                    if event_usage := event.get("usage"):
+                        usage = Usage(
+                            input_tokens=int(event_usage.get("prompt_tokens", 0)),
+                            output_tokens=int(event_usage.get("completion_tokens", 0)),
+                        )
+                    choices = event.get("choices", [])
+                    if choices:
+                        text = choices[0].get("delta", {}).get("content") or ""
+                        if text:
+                            yield Delta(text=text)
+        except httpx.TimeoutException as exc:
+            raise AppError(ErrorCode.AI_TIMEOUT, "The Groq model stream timed out.") from exc
+        except httpx.HTTPError as exc:
+            raise AppError(
+                ErrorCode.AI_PROVIDER_UNAVAILABLE, "The Groq model stream failed."
+            ) from exc
+
+
+def _raise_for_groq_status(response: httpx.Response) -> None:
+    if response.status_code == 429:
+        raise AppError(ErrorCode.RATE_LIMITED, "The Groq API is rate limiting us.")
+    if response.status_code >= 400:
+        try:
+            provider_message = str(response.json().get("error", {}).get("message", ""))[:500]
+        except (ValueError, AttributeError):
+            provider_message = ""
+        raise AppError(
+            ErrorCode.AI_PROVIDER_UNAVAILABLE,
+            "The Groq API rejected the request.",
+            detail={"status": response.status_code, "provider_message": provider_message},
+        )
 
 
 class DeterministicProvider:

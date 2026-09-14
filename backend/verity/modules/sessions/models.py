@@ -250,6 +250,11 @@ class SessionFeedback(Base, UUIDPrimaryKey, Timestamped, UserOwned):
     per_question: Mapped[list[Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    #: Requirement-by-requirement coverage (PRD §27). Populated for live
+    #: sessions, where coverage — not a score — is the honest measurement.
+    coverage: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
     #: Attribution for every generated report (PRD FR-AI-022).
     rubric_version: Mapped[str] = mapped_column(String(32), nullable=False)

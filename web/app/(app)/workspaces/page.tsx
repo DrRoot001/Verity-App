@@ -95,7 +95,8 @@ export default function WorkspacesPage() {
 
             <div className="space-y-1.5">
               <label htmlFor="jd" className="block text-sm font-medium">
-                Job description <span className="text-[var(--color-text-muted)]">(optional)</span>
+                Job description{" "}
+                <span className="text-[var(--color-text-muted)]">(optional)</span>
               </label>
               <textarea
                 id="jd"
@@ -141,7 +142,9 @@ export default function WorkspacesPage() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-0.5">
                       <p className="font-medium">{w.role_title}</p>
-                      <p className="text-sm text-[var(--color-text-secondary)]">{w.company_name}</p>
+                      <p className="text-sm text-[var(--color-text-secondary)]">
+                        {w.company_name}
+                      </p>
                       <p className="text-xs text-[var(--color-text-muted)]">
                         {w.stage.replace(/_/g, " ")} · round {w.round_index}
                       </p>

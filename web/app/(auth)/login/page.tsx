@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
+import { Logo } from "@/components/brand/logo";
+import { whoami } from "@/features/admin/api";
 import { login, signup } from "@/features/auth/api";
 import { bootstrapSession, storeSession } from "@/features/auth/session";
 import { ApiError, NetworkError } from "@/lib/api/client";
@@ -17,7 +20,9 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<{ message: string; requestId: string | null } | null>(null);
+  const [error, setError] = useState<{ message: string; requestId: string | null } | null>(
+    null,
+  );
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -32,12 +37,17 @@ export default function LoginPage() {
 
     try {
       if (mode === "signup") {
-        const result = await signup(email, password);
-        setNotice(result.message);
+        await signup(email, password);
+        setNotice(
+          "Account created. Check your email and click the confirmation link to finish.",
+        );
         setMode("signin");
       } else {
         storeSession(await login(email, password));
-        router.push("/dashboard");
+        const isStaff = await whoami()
+          .then(() => true)
+          .catch(() => false);
+        router.push(isStaff ? "/admin" : "/dashboard");
       }
     } catch (caught) {
       if (caught instanceof ApiError) {
@@ -54,14 +64,12 @@ export default function LoginPage() {
   }
 
   return (
-    <main id="main" className="mx-auto flex min-h-screen max-w-[26rem] flex-col justify-center px-6">
+    <main
+      id="main"
+      className="mx-auto flex min-h-screen max-w-[26rem] flex-col justify-center px-6"
+    >
       <div className="mb-8 space-y-3">
-        <span
-          aria-hidden="true"
-          className="grid size-9 place-items-center rounded-[10px] bg-[var(--color-accent)] text-sm font-bold text-[var(--color-accent-contrast)] shadow-[var(--shadow-2)]"
-        >
-          V
-        </span>
+        <Logo href="/" />
         <div className="space-y-1.5">
           <h1 className="text-2xl">
             {mode === "signin" ? "Welcome back" : "Create your workspace"}
@@ -132,7 +140,8 @@ export default function LoginPage() {
                 <p>{error.message}</p>
                 {error.requestId ? (
                   <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                    Reference: <code className="font-[var(--font-mono)]">{error.requestId}</code>
+                    Reference:{" "}
+                    <code className="font-[var(--font-mono)]">{error.requestId}</code>
                   </p>
                 ) : null}
               </div>
@@ -150,6 +159,17 @@ export default function LoginPage() {
             <Button type="submit" size="lg" loading={busy} fullWidth>
               {mode === "signin" ? "Sign in" : "Create account"}
             </Button>
+
+            {mode === "signin" ? (
+              <p className="text-center text-sm">
+                <Link
+                  href="/forgot-password"
+                  className="text-[var(--color-text-secondary)] underline-offset-2 hover:underline"
+                >
+                  Forgot your password?
+                </Link>
+              </p>
+            ) : null}
           </form>
         </CardBody>
       </Card>

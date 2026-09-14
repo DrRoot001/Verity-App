@@ -36,9 +36,9 @@ from verity.modules.sessions.live_models import (
 )
 from verity.modules.sessions.models import SpeakerRole, TranscriptSegment
 from verity.platform.cache import RedisRole, get_redis
-from verity.platform.config import settings
 from verity.platform.errors import AppError, ErrorCode
 from verity.platform.logging import get_logger
+from verity.platform.runtime_config import ai_settings
 from verity.platform.telemetry import stage_span
 from verity.realtime import protocol
 from verity.realtime.detector import Detection, detect, is_superseded_by
@@ -361,16 +361,19 @@ class LiveSessionEngine:
 
     # ── Metering (PRD §33) ───────────────────────────────────────────
 
-    def can_generate(self) -> tuple[bool, str | None]:
+    async def can_generate(self) -> tuple[bool, str | None]:
         """Per-session and per-minute caps, checked before any model call."""
-        if self.session.generation_count >= settings.session_max_generations:
+        runtime = await ai_settings()
+        if self.session.generation_count >= int(runtime["session_max_generations"]):
             return False, "session generation cap reached"
 
         now = time.monotonic()
         self.state.generations_this_minute = [
             t for t in self.state.generations_this_minute if now - t < 60
         ]
-        if len(self.state.generations_this_minute) >= settings.session_max_generations_per_minute:
+        if len(self.state.generations_this_minute) >= int(
+            runtime["session_max_generations_per_minute"]
+        ):
             return False, "generation rate limit"
         return True, None
 

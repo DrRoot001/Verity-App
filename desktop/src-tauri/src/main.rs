@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio;
+mod debuglog;
 #[cfg(all(target_os = "macos", feature = "native-system-audio"))]
 mod native_audio;
 mod platform;
@@ -40,6 +41,7 @@ struct AppState {
     capture: Mutex<Option<CaptureHandle>>,
     preferences_path: Mutex<Option<PathBuf>>,
     preferences: Mutex<preferences::Preferences>,
+    debug_log_path: Mutex<Option<PathBuf>>,
 }
 
 #[derive(Serialize)]
@@ -56,6 +58,8 @@ struct DesktopSettings {
     job_description: String,
     language: String,
     chat_model: String,
+    chat_provider: String,
+    chat_api_keys: Vec<String>,
     protect_hud_from_screen_capture: bool,
 }
 
@@ -69,6 +73,8 @@ impl From<&preferences::Preferences> for DesktopSettings {
             job_description: value.job_description.clone(),
             language: value.language.clone(),
             chat_model: value.chat_model.clone(),
+            chat_provider: value.chat_provider.clone(),
+            chat_api_keys: value.chat_api_keys.clone(),
             protect_hud_from_screen_capture: value.protect_hud_from_screen_capture,
         }
     }
@@ -115,6 +121,10 @@ async fn get_desktop_settings(state: State<'_, AppState>) -> Result<DesktopSetti
     Ok(DesktopSettings::from(&*saved))
 }
 
+// A Tauri command's parameters are exactly its JS-facing API: each one is a
+// field the frontend's invoke() call names directly, so bundling them into a
+// struct would only relocate the count into the frontend's call site too.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, AppState>,
@@ -125,6 +135,8 @@ async fn save_desktop_settings(
     job_description: String,
     language: String,
     chat_model: String,
+    chat_provider: String,
+    chat_api_keys: Vec<String>,
 ) -> Result<DesktopSettings, String> {
     let path = state
         .preferences_path
@@ -141,6 +153,10 @@ async fn save_desktop_settings(
     saved.job_description = job_description.trim().to_string();
     saved.language = language.trim().to_string();
     saved.chat_model = chat_model.trim().to_string();
+    saved.chat_provider = session::ChatProvider::parse(&chat_provider)
+        .as_str()
+        .to_string();
+    saved.chat_api_keys = normalize_api_keys(chat_api_keys);
     preferences::save(&path, &saved).map_err(|error| error.to_string())?;
     *state.preferences.lock().unwrap() = saved.clone();
     Ok(DesktopSettings::from(&saved))
@@ -156,8 +172,31 @@ async fn test_groq_connection(
         .map_err(|error| error.to_string())
 }
 
+/// Tests whatever is currently typed in the setup screen, not what was last
+/// saved — mirrors `test_groq_connection`'s own behavior, and lets a key get
+/// verified before the user commits to starting a live session with it.
 #[tauri::command]
-async fn extract_document_text(file_name: String, bytes: Vec<u8>) -> Result<String, String> {
+async fn test_chat_provider(
+    provider: String,
+    api_keys: Vec<String>,
+) -> Result<session::ApiTestResult, String> {
+    session::test_provider_keys(session::ChatProvider::parse(&provider), &api_keys)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// `contents` is base64, not a raw byte array: a JS number-array of file
+/// bytes bloats to 3-4x its size once JSON-encoded for IPC and gave no
+/// progress feedback while it serialized, which for a multi-MB PDF looked
+/// exactly like the import had silently hung. Base64 is ~1.33x, and the
+/// browser's own base64 encoder (`FileReader.readAsDataURL`) does the work
+/// off the array-spread path entirely.
+#[tauri::command]
+async fn extract_document_text(file_name: String, contents: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(contents.as_bytes())
+        .map_err(|_| "The document could not be read.".to_string())?;
     if bytes.is_empty() {
         return Err("The selected document is empty.".to_string());
     }
@@ -169,9 +208,10 @@ async fn extract_document_text(file_name: String, bytes: Vec<u8>) -> Result<Stri
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let byte_count = bytes.len();
     let text = match extension.as_str() {
         "pdf" => pdf_extract::extract_text_from_mem(&bytes).map_err(|error| {
-            format!("Could not read PDF text. Scanned-image PDFs need OCR: {error}")
+            format!("Could not read PDF text. Scanned-image PDFs need OCR, which this app does not do: {error}")
         })?,
         "txt" | "md" => String::from_utf8(bytes)
             .map_err(|_| "The document is not valid UTF-8 text.".to_string())?,
@@ -179,7 +219,18 @@ async fn extract_document_text(file_name: String, bytes: Vec<u8>) -> Result<Stri
     };
     let text = text.trim().to_string();
     if text.is_empty() {
-        return Err("No readable text was found in the document.".to_string());
+        return Err("No readable text was found in the document. If this PDF is a scanned image rather than real text, paste the content in manually instead — this app has no OCR.".to_string());
+    }
+    // A real multi-page resume/JD compresses to far more than this from any
+    // text-based PDF; this little text from a file this size means
+    // extraction likely half-succeeded (a font pdf-extract could not map
+    // correctly) rather than that the document is genuinely this short.
+    if byte_count > 50_000 && text.len() < 40 {
+        return Err(format!(
+            "Only {} characters came out of a {} KB PDF — extraction likely failed silently rather than the document being this short. Paste the text in manually instead.",
+            text.len(),
+            byte_count / 1024
+        ));
     }
     Ok(text)
 }
@@ -192,6 +243,10 @@ async fn start_listening(
     state: State<'_, AppState>,
     device: String,
 ) -> Result<StartResult, String> {
+    let log_path = state.debug_log_path.lock().unwrap().clone();
+    if let Some(path) = &log_path {
+        debuglog::log(path, &format!("start_listening: device = {device:?}"));
+    }
     if state.capture.lock().unwrap().is_some() {
         return Err("A listening session is already active.".to_string());
     }
@@ -207,28 +262,79 @@ async fn start_listening(
         job_description: saved.job_description,
         language: saved.language,
         chat_model: saved.chat_model,
+        chat_provider: session::ChatProvider::parse(&saved.chat_provider),
+        chat_api_keys: saved.chat_api_keys,
     };
 
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<audio::CaptureMessage>();
     let capture = if device == audio::NATIVE_SYSTEM_AUDIO_DEVICE_ID {
         #[cfg(all(target_os = "macos", feature = "native-system-audio"))]
         {
-            CaptureHandle::Native(native_audio::start(raw_tx).map_err(|e| e.to_string())?)
+            match native_audio::start(raw_tx) {
+                Ok(handle) => CaptureHandle::Native(handle),
+                Err(err) => {
+                    if let Some(path) = &log_path {
+                        debuglog::log(path, &format!("native_audio::start failed: {err}"));
+                    }
+                    return Err(err.to_string());
+                }
+            }
         }
         #[cfg(not(all(target_os = "macos", feature = "native-system-audio")))]
         {
             return Err("Native system audio capture is only available on macOS 13+.".to_string());
         }
     } else {
-        CaptureHandle::Loopback(audio::start(&device, raw_tx).map_err(|e| e.to_string())?)
+        match audio::start(&device, raw_tx) {
+            Ok(handle) => {
+                if let Some(path) = &log_path {
+                    debuglog::log(path, "audio::start: stream opened successfully");
+                }
+                CaptureHandle::Loopback(handle)
+            }
+            Err(err) => {
+                if let Some(path) = &log_path {
+                    debuglog::log(path, &format!("audio::start failed: {err}"));
+                }
+                return Err(err.to_string());
+            }
+        }
     };
 
     let (audio_tx, audio_rx) = mpsc::channel::<audio::CaptureMessage>(64);
+    let bridge_log_path = log_path.clone();
     std::thread::spawn(move || {
         // Bridge the realtime thread to async without blocking either.
+        // The first-message and periodic logs exist to answer one question
+        // when capture silently produces nothing downstream: did the
+        // realtime callback ever fire at all, or did it fire and something
+        // past this point drop it.
+        let mut received: u64 = 0;
         while let Ok(message) = raw_rx.recv() {
+            received += 1;
+            if let Some(path) = &bridge_log_path {
+                if received == 1 {
+                    debuglog::log(
+                        path,
+                        "bridge: first audio message received from capture thread",
+                    );
+                } else if received % 500 == 0 {
+                    debuglog::log(path, &format!("bridge: {received} messages relayed so far"));
+                }
+            }
             if audio_tx.blocking_send(message).is_err() {
+                if let Some(path) = &bridge_log_path {
+                    debuglog::log(path, "bridge: session receiver dropped, stopping");
+                }
                 break;
+            }
+        }
+        if received == 0 {
+            if let Some(path) = &bridge_log_path {
+                debuglog::log(
+                    path,
+                    "bridge: capture thread ended with ZERO messages ever received",
+                );
             }
         }
     });
@@ -242,9 +348,21 @@ async fn start_listening(
             .unwrap_or_default()
     );
     let handle = app.clone();
+    let session_log_path = log_path.clone();
     tokio::spawn(async move {
-        if let Err(err) = session::run_session(handle.clone(), settings, audio_rx, stop_rx).await {
+        if let Err(err) = session::run_session(
+            handle.clone(),
+            settings,
+            audio_rx,
+            stop_rx,
+            session_log_path.clone(),
+        )
+        .await
+        {
             eprintln!("session ended: {err}");
+            if let Some(path) = &session_log_path {
+                debuglog::log(path, &format!("run_session ended with error: {err}"));
+            }
             let _ = handle.emit(
                 "verity://event",
                 session::ServerEvent {
@@ -410,6 +528,8 @@ fn main() {
 
             let config_dir = app.path().app_config_dir()?;
             let preferences_path = preferences::path(&config_dir);
+            let debug_log_path = debuglog::path(&config_dir);
+            debuglog::log(&debug_log_path, "--- app launched ---");
             let mut saved = preferences::load(&preferences_path);
             if saved.groq_api_keys.is_empty() && !saved.groq_api_key.is_empty() {
                 saved.groq_api_keys.push(saved.groq_api_key.clone());
@@ -430,6 +550,7 @@ fn main() {
             let state = app.state::<AppState>();
             *state.preferences_path.lock().unwrap() = Some(preferences_path);
             *state.preferences.lock().unwrap() = saved.clone();
+            *state.debug_log_path.lock().unwrap() = Some(debug_log_path);
 
             if let Some(window) = app.get_webview_window("main") {
                 window.set_always_on_top(true)?;
@@ -452,6 +573,7 @@ fn main() {
             get_desktop_settings,
             save_desktop_settings,
             test_groq_connection,
+            test_chat_provider,
             extract_document_text,
             start_listening,
             stop_listening,
@@ -465,7 +587,12 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_api_keys;
+    use super::{extract_document_text, normalize_api_keys};
+    use base64::Engine;
+
+    fn to_base64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
 
     #[test]
     fn api_keys_are_trimmed_deduplicated_and_empty_values_removed() {
@@ -478,5 +605,97 @@ mod tests {
             ]),
             vec!["gsk_one".to_string(), "gsk_two".to_string()]
         );
+    }
+
+    /// Guards the bug that made the app look like it had no working audio:
+    /// Tauri v2 grants nothing without a capability file, and the frontend's
+    /// `listen()` is an ACL-gated core-plugin call. Losing this permission
+    /// drops every backend event before the UI sees it, and because the
+    /// rejected promise is invisible in a release webview, nothing reports
+    /// the failure. A missing capability must break the build, not the
+    /// interview.
+    #[test]
+    fn the_ui_is_granted_permission_to_receive_backend_events() {
+        let generated =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gen/schemas/capabilities.json");
+        let contents = std::fs::read_to_string(&generated).unwrap_or_else(|error| {
+            panic!("could not read {}: {error}", generated.display());
+        });
+
+        assert!(
+            contents.contains("core:default") || contents.contains("core:event"),
+            "no capability grants the event permissions `listen` needs, so the \
+             HUD would receive nothing. Generated ACL was: {contents}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plain_text_document_round_trips_through_base64() {
+        let contents = to_base64(b"Line one.\nLine two.");
+        let text = extract_document_text("resume.txt".to_string(), contents)
+            .await
+            .unwrap();
+        assert_eq!(text, "Line one.\nLine two.");
+    }
+
+    #[tokio::test]
+    async fn a_real_pdf_extracts_its_actual_text() {
+        // Built with cupsfilter from plain text, the simplest real PDF this
+        // machine can produce — proof the whole base64 -> decode -> pdf-extract
+        // path genuinely runs, not just that it compiles.
+        let pdf = std::process::Command::new("cupsfilter")
+            .args(["-i", "text/plain"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(b"VERITY PDF EXTRACTION TEST LINE")?;
+                child.wait_with_output()
+            });
+        let Ok(output) = pdf else {
+            eprintln!("cupsfilter unavailable on this machine; skipping");
+            return;
+        };
+        if !output.status.success() || output.stdout.is_empty() {
+            eprintln!("cupsfilter did not produce a PDF; skipping");
+            return;
+        }
+        let text = extract_document_text("resume.pdf".to_string(), to_base64(&output.stdout))
+            .await
+            .unwrap();
+        assert!(
+            text.contains("VERITY PDF EXTRACTION TEST LINE"),
+            "expected the real text back out, got: {text:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_document_is_a_clear_error_not_a_panic() {
+        let error = extract_document_text("resume.pdf".to_string(), String::new())
+            .await
+            .unwrap_err();
+        assert!(error.contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn invalid_base64_is_a_clear_error_not_a_panic() {
+        let error = extract_document_text("resume.pdf".to_string(), "not base64!!".to_string())
+            .await
+            .unwrap_err();
+        assert!(!error.is_empty());
+    }
+
+    #[tokio::test]
+    async fn unsupported_extension_is_rejected_before_any_parsing() {
+        let error = extract_document_text("resume.docx".to_string(), to_base64(b"anything"))
+            .await
+            .unwrap_err();
+        assert!(error.contains("PDF, TXT, or Markdown"));
     }
 }

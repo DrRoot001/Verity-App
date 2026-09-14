@@ -20,7 +20,7 @@
         "contentProtected": true,
         "skipTaskbar": true,
         "decorations": true,
-        "transparent": false,
+        "transparent": true,
         "center": false,
         "x": 40,
         "y": 80

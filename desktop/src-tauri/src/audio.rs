@@ -142,29 +142,77 @@ fn loopback_entries(
     entries
 }
 
+/// A hot-pluggable analog jack (common on Windows laptops: "Headphones",
+/// "Jack Mic") can be present in one WASAPI enumeration and gone from the
+/// next, seemingly at random, well within the few seconds between the setup
+/// screen listing devices and the user clicking Start — no unplugging
+/// required, this has been observed as transient enumerator flakiness on
+/// real Realtek hardware. Retrying absorbs that instead of failing a session
+/// start on what the next enumeration would have found anyway.
+const FIND_DEVICE_ATTEMPTS: u32 = 4;
+const FIND_DEVICE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
 fn find_device(name: &str) -> Result<Device> {
+    let mut last_available = Vec::new();
+    for attempt in 0..FIND_DEVICE_ATTEMPTS {
+        match try_find_device_once(name) {
+            Ok(device) => return Ok(device),
+            Err(available) => {
+                last_available = available;
+                if attempt + 1 < FIND_DEVICE_ATTEMPTS {
+                    std::thread::sleep(FIND_DEVICE_RETRY_DELAY);
+                }
+            }
+        }
+    }
+    Err(anyhow!(
+        "input device '{name}' was not found after {FIND_DEVICE_ATTEMPTS} tries. \
+         Currently available: {}. If the one you picked is a headphone/mic jack, \
+         it may have dropped out of Windows' device list — reopen Setup to refresh \
+         it, or pick a different source.",
+        if last_available.is_empty() {
+            "(none)".to_string()
+        } else {
+            last_available.join(", ")
+        }
+    ))
+}
+
+/// One enumeration pass. `Err` carries every device name actually seen, so a
+/// final failure can tell the user what Windows had instead of just what it
+/// didn't have.
+fn try_find_device_once(name: &str) -> std::result::Result<Device, Vec<String>> {
     let host = cpal::default_host();
     if name.is_empty() {
-        return host
-            .default_input_device()
-            .ok_or_else(|| anyhow!("no input device available"));
+        return host.default_input_device().ok_or_else(Vec::new);
     }
-    for device in host.input_devices()? {
-        if device.name().map(|n| n == name).unwrap_or(false) {
-            return Ok(device);
+    let mut seen = Vec::new();
+    if let Ok(inputs) = host.input_devices() {
+        for device in inputs {
+            if let Ok(device_name) = device.name() {
+                if device_name == name {
+                    return Ok(device);
+                }
+                seen.push(device_name);
+            }
         }
     }
     // Not a capture endpoint: on Windows it may be an output device, which
     // WASAPI opens in loopback mode. `list_devices` guarantees the name is
     // unique across both lists, so this cannot shadow a microphone.
     if cfg!(target_os = "windows") {
-        for device in host.output_devices()? {
-            if device.name().map(|n| n == name).unwrap_or(false) {
-                return Ok(device);
+        if let Ok(outputs) = host.output_devices() {
+            for device in outputs {
+                if let Ok(device_name) = device.name() {
+                    if device_name == name {
+                        return Ok(device);
+                    }
+                    seen.push(device_name);
+                }
             }
         }
     }
-    Err(anyhow!("input device '{name}' was not found"))
+    Err(seen)
 }
 
 /// Mix to mono and resample to 16 kHz.
@@ -336,6 +384,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_missing_device_is_retried_before_giving_up() {
+        // No mock here: this hits the real cpal enumeration on whatever host
+        // is running, with a name guaranteed not to exist. What it proves is
+        // the retry loop itself actually runs FIND_DEVICE_ATTEMPTS times with
+        // FIND_DEVICE_RETRY_DELAY between them, not just that it compiles —
+        // one-shot failure would return in well under the delay for one
+        // retry alone.
+        let started = std::time::Instant::now();
+        let error = match find_device("definitely-not-a-real-device-9f3c2a") {
+            Ok(_) => panic!("this device name must not exist on any real host"),
+            Err(error) => error,
+        };
+        let elapsed = started.elapsed();
+
+        let minimum_retry_time = FIND_DEVICE_RETRY_DELAY * (FIND_DEVICE_ATTEMPTS - 1);
+        assert!(
+            elapsed >= minimum_retry_time,
+            "expected at least {minimum_retry_time:?} from {} retries, only took {elapsed:?}",
+            FIND_DEVICE_ATTEMPTS - 1
+        );
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("after {FIND_DEVICE_ATTEMPTS} tries")),
+            "error should say how many attempts were made: {error}"
+        );
+    }
+
+    #[test]
     fn stereo_is_mixed_to_mono() {
         // One channel hard left, one hard right: the mean is silence.
         let samples = vec![1.0, -1.0, 1.0, -1.0];
@@ -360,6 +437,50 @@ mod tests {
     #[test]
     fn empty_input_yields_empty_output() {
         assert!(to_mono_16k(&[], 2, 48_000).is_empty());
+    }
+
+    /// Runs the real enumeration against whatever host this is built on, so
+    /// the Windows output-device path is exercised by CI rather than only
+    /// type-checked. A machine with no audio hardware is not a failure — CI
+    /// runners often have none — but if it does list devices, the invariants
+    /// that make selection work must hold.
+    #[test]
+    fn real_device_listing_holds_its_invariants() {
+        let Ok(devices) = list_devices() else {
+            eprintln!("no audio host available; skipping");
+            return;
+        };
+        for device in &devices {
+            eprintln!(
+                "device: {:?} loopback={} default={}",
+                device.name, device.is_loopback, device.is_default
+            );
+        }
+
+        // The name is the only device id the UI and preferences carry, so a
+        // duplicate would make two devices indistinguishable and could send
+        // capture to the wrong one.
+        let mut names: Vec<&str> = devices.iter().map(|d| d.name.as_str()).collect();
+        let total = names.len();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), total, "device names must be unique: {names:?}");
+
+        // The setup screen offers the first loopback entry, so any loopback
+        // marked default has to sort ahead of the ones that are not.
+        let loopbacks: Vec<bool> = devices
+            .iter()
+            .filter(|d| d.is_loopback)
+            .map(|d| d.is_default)
+            .collect();
+        if let Some(first_plain) = loopbacks.iter().position(|is_default| !is_default) {
+            assert!(
+                !loopbacks[first_plain..]
+                    .iter()
+                    .any(|is_default| *is_default),
+                "a default loopback must not sort after a non-default one"
+            );
+        }
     }
 
     #[test]

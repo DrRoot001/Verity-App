@@ -297,8 +297,10 @@ class PreparationService:
                     section=PlanSection.BEHAVIORAL,
                     title=f"Practise: {theme[:150]}",
                     detail=(
-                        f"From your last mock interview ({dimension}). "
-                        + str(weakness.get("evidence", ""))
+                        # The producer may be a mock or a live session; the
+                        # plan does not need to care which measured it.
+                        f"From your last session ({dimension}). "
+                        + str(weakness.get("evidence", weakness.get("detail", "")))
                     ).strip(),
                     action={
                         "type": "start_mock",

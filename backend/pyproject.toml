@@ -27,6 +27,10 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http>=1.28",
     "prometheus-client>=0.21",
     "websockets>=13.1",
+    # Resume text extraction. Imported lazily inside the extractors, which is
+    # why their absence was not caught at import time.
+    "pypdf>=4.3",
+    "python-docx>=1.1",
 ]
 
 [project.optional-dependencies]
@@ -148,6 +152,11 @@ exhaustive = false
 name = "Feature modules sit above Candidate Intelligence"
 type = "layers"
 layers = [
+    # Privacy erases every store, so it sits above everything it deletes.
+    "verity.modules.privacy",
+    # Admin observes every module and is observed by none: an operator tool that
+    # a feature module could import back would put staff logic on a user path.
+    "verity.modules.admin",
     "verity.modules.preparation",
     "verity.modules.sessions",
     "verity.modules.workspace",

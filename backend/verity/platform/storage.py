@@ -53,6 +53,10 @@ class ObjectStorage(Protocol):
 
     async def delete_prefix(self, prefix: str) -> int: ...
 
+    #: Deletion is only complete when a listing comes back empty
+    #: (PRD AC-PRIV-001), so verification is part of the interface.
+    async def list_prefix(self, prefix: str) -> list[str]: ...
+
     async def signed_url(self, key: str, *, expires_in: timedelta) -> str: ...
 
 
@@ -108,6 +112,12 @@ class LocalObjectStorage:
         count = sum(1 for p in root.rglob("*") if p.is_file())
         shutil.rmtree(root, ignore_errors=True)
         return count
+
+    async def list_prefix(self, prefix: str) -> list[str]:
+        root = self._resolve(prefix)
+        if not root.exists():
+            return []
+        return [str(p.relative_to(self._root)) for p in root.rglob("*") if p.is_file()]
 
     async def signed_url(self, key: str, *, expires_in: timedelta) -> str:
         # Local development serves through the API rather than a CDN, so the

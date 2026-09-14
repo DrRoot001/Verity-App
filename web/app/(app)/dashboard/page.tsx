@@ -55,6 +55,11 @@ export default function DashboardPage() {
     .filter((w) => w.interview_at && !w.archived)
     .sort((a, b) => (a.interview_at ?? "").localeCompare(b.interview_at ?? ""))[0];
 
+  // A brand-new account has nothing to build on. Sending it to "create a
+  // workspace" first produces a workspace that can match nothing and an
+  // interview the readiness gate will refuse, so the resume comes first.
+  const empty = queue.approved_count === 0 && queue.pending_count === 0;
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -62,12 +67,38 @@ export default function DashboardPage() {
         description="What you're preparing for, and what to do next."
       />
 
+      {empty ? (
+        <Card>
+          <CardHeader
+            title="Start with your resume"
+            meta="Everything else in Verity is built from it — matching, questions, and the evidence your guidance cites."
+            action={
+              <Button size="sm" href="/documents">
+                Add your resume
+              </Button>
+            }
+          />
+          <CardBody>
+            <ol className="space-y-2 text-sm text-[var(--color-text-secondary)]">
+              <li>1. Upload or paste your resume.</li>
+              <li>2. Confirm what was extracted — only confirmed facts are ever cited.</li>
+              <li>3. Create a workspace for the role and paste its job description.</li>
+              <li>4. Practise in a mock interview, then use the copilot for the real one.</li>
+            </ol>
+          </CardBody>
+        </Card>
+      ) : null}
+
       {queue.pending_count > 0 ? (
         <Card>
           <CardHeader
             title="Confirm your profile"
             meta={`${queue.pending_count} extracted item${queue.pending_count === 1 ? "" : "s"} awaiting review`}
-            action={<Button size="sm" href="/review">Review now</Button>}
+            action={
+              <Button size="sm" href="/review">
+                Review now
+              </Button>
+            }
           />
           <CardBody>
             <p className="text-sm text-[var(--color-text-secondary)]">
@@ -86,14 +117,26 @@ export default function DashboardPage() {
             <CardHeader
               title={`${next.role_title} · ${next.company_name}`}
               meta={`${next.stage.replace(/_/g, " ")} · round ${next.round_index}`}
-              action={<Button size="sm" href={`/workspaces/${next.id}`}>Open workspace</Button>}
+              action={
+                <Button size="sm" href={`/workspaces/${next.id}`}>
+                  Open workspace
+                </Button>
+              }
             />
           </Card>
         ) : (
           <Empty
             title="No scheduled interview"
-            description="Create a workspace for the role you're targeting and add its job description."
-            action={{ label: "Create workspace", href: "/workspaces" }}
+            description={
+              empty
+                ? "Add your resume first — a workspace has nothing to match against without it."
+                : "Create a workspace for the role you're targeting and add its job description."
+            }
+            action={
+              empty
+                ? { label: "Add your resume", href: "/documents" }
+                : { label: "Create workspace", href: "/workspaces" }
+            }
           />
         )}
       </section>
@@ -118,7 +161,9 @@ export default function DashboardPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="font-medium">{w.role_title}</p>
-                          <p className="text-sm text-[var(--color-text-secondary)]">{w.company_name}</p>
+                          <p className="text-sm text-[var(--color-text-secondary)]">
+                            {w.company_name}
+                          </p>
                         </div>
                         <Badge tone={w.integrity_mode === "proctored" ? "warning" : "neutral"}>
                           {w.integrity_mode}

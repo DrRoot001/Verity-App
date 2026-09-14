@@ -17,10 +17,13 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from verity.apps.api.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from verity.modules.admin.router import admin_router
+from verity.modules.admin.runtime import synchronize_runtime
 from verity.modules.candidate_graph.router import profile_router, stories_router
 from verity.modules.health.router import router as health_router
 from verity.modules.identity.router import auth_router, users_router
 from verity.modules.preparation.router import preparation_router
+from verity.modules.privacy.router import admin_privacy_router, privacy_router
 from verity.modules.sessions.live_router import live_router, rt_router
 from verity.modules.sessions.router import mock_router
 from verity.modules.workspace.router import resumes_router, workspaces_router
@@ -44,6 +47,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         await warm_pool()
         log.info("db_pool_warm")
+        await synchronize_runtime()
+        log.info("admin_runtime_synchronized")
     except Exception as exc:
         # Do not crash the process: readiness will report down and the
         # orchestrator will hold traffic until the dependency recovers.
@@ -139,6 +144,9 @@ def create_app() -> FastAPI:
     app.include_router(mock_router)
     app.include_router(live_router)
     app.include_router(rt_router)
+    app.include_router(admin_router)
+    app.include_router(admin_privacy_router)
+    app.include_router(privacy_router)
 
     return app
 

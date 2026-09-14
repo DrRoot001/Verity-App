@@ -28,11 +28,12 @@ from verity.ai.providers.base import (
     Message,
     TaskClass,
 )
-from verity.ai.providers.llm import AnthropicProvider, DeterministicProvider
+from verity.ai.providers.llm import AnthropicProvider, DeterministicProvider, GroqProvider
 from verity.platform.cache import RedisRole, get_redis
 from verity.platform.config import Environment, settings
 from verity.platform.errors import AppError, ErrorCode
 from verity.platform.logging import get_logger
+from verity.platform.runtime_config import ai_settings
 from verity.platform.telemetry import ai_cost_usd, ai_tokens, provider_fallbacks, stage_span
 
 log = get_logger("ai.gateway")
@@ -62,6 +63,18 @@ MODEL_ALIASES: dict[str, ModelSpec] = {
     "realtime_primary": ModelSpec("anthropic", "claude-sonnet-5", 3.0, 15.0),
     "reasoning_primary": ModelSpec("anthropic", "claude-opus-5", 15.0, 75.0),
     "reasoning_batch": ModelSpec("anthropic", "claude-sonnet-5", 3.0, 15.0),
+    "deterministic": ModelSpec("deterministic", "deterministic-v1", 0.0, 0.0),
+}
+
+#: Groq production models and current per-million-token pricing. Model IDs are
+#: configurable so a provider deprecation does not require an application
+#: release; these specs retain the aliases consumed by the routing table.
+GROQ_MODEL_ALIASES: dict[str, ModelSpec] = {
+    "fast_small": ModelSpec("groq", settings.groq_fast_model, 0.05, 0.08),
+    "fast_realtime": ModelSpec("groq", settings.groq_fast_model, 0.05, 0.08),
+    "realtime_primary": ModelSpec("groq", settings.groq_realtime_model, 0.075, 0.30),
+    "reasoning_primary": ModelSpec("groq", settings.groq_primary_model, 0.15, 0.60),
+    "reasoning_batch": ModelSpec("groq", settings.groq_primary_model, 0.15, 0.60),
     "deterministic": ModelSpec("deterministic", "deterministic-v1", 0.0, 0.0),
 }
 
@@ -116,25 +129,32 @@ class AIGateway:
 
     # ── Routing ──────────────────────────────────────────────────────
 
-    def _aliases_for(self, task_class: TaskClass) -> tuple[str, ...]:
+    def _aliases_for(self, task_class: TaskClass, runtime: dict[str, Any]) -> tuple[str, ...]:
         aliases = ROUTING.get(task_class, ("fast_small",))
         if self._model_tier != "premium":
             downgraded = tuple(a for a in aliases if a not in PREMIUM_ALIASES)
             # Never leave a task unroutable: fall back to the cheapest capable
             # tier rather than failing a request over an entitlement.
             aliases = downgraded or ("realtime_primary",)
-        if not _real_provider_configured():
+        if not _real_provider_configured(runtime):
             return ("deterministic",)
         return aliases
 
     def _provider(self, spec: ModelSpec) -> LLMProvider:
-        cached = self._providers.get(spec.model)
+        cache_key = f"{spec.provider}:{spec.model}"
+        cached = self._providers.get(cache_key)
         if cached is not None:
             return cached
 
         if spec.provider == "anthropic":
             provider: LLMProvider = AnthropicProvider(
                 api_key=settings.anthropic_api_key.get_secret_value(), model=spec.model
+            )
+        elif spec.provider == "groq":
+            provider = GroqProvider(
+                api_key=settings.groq_api_key.get_secret_value(),
+                model=spec.model,
+                base_url=settings.groq_base_url,
             )
         elif spec.provider == "deterministic":
             if settings.env.is_production_like:
@@ -144,7 +164,7 @@ class AIGateway:
         else:
             raise AppError.internal(f"Unknown provider '{spec.provider}'.")
 
-        self._providers[spec.model] = provider
+        self._providers[cache_key] = provider
         return provider
 
     # ── Budget (PRD §33) ─────────────────────────────────────────────
@@ -161,16 +181,16 @@ class AIGateway:
         await redis.incrbyfloat(key, amount)
         await redis.expire(key, 172_800)
 
-    async def _check_budget(self) -> None:
+    async def _check_budget(self, runtime: dict[str, Any]) -> None:
         spent = await self._spend_today()
-        budget = settings.ai_daily_budget_usd
+        budget = float(runtime["daily_budget_usd"])
         if spent >= budget:
             raise AppError(
                 ErrorCode.AI_BUDGET_EXCEEDED,
                 "AI usage has reached today's budget.",
                 detail={"spent_usd": round(spent, 2), "budget_usd": budget},
             )
-        if spent >= budget * settings.ai_budget_soft_threshold:
+        if spent >= budget * float(runtime["budget_soft_threshold"]):
             log.warning("ai_budget_soft_threshold", spent_usd=round(spent, 2), budget_usd=budget)
 
     # ── Generation ───────────────────────────────────────────────────
@@ -187,7 +207,8 @@ class AIGateway:
         user_id: uuid.UUID | None = None,
         feature: str = "unspecified",
     ) -> GenerationResult:
-        await self._check_budget()
+        runtime = await ai_settings()
+        await self._check_budget(runtime)
 
         request = CompletionRequest(
             task_class=task_class,
@@ -198,11 +219,11 @@ class AIGateway:
             timeout_seconds=timeout_seconds,
         )
 
-        aliases = self._aliases_for(task_class)
+        aliases = self._aliases_for(task_class, runtime)
         last_error: AppError | None = None
 
         for index, alias in enumerate(aliases):
-            spec = MODEL_ALIASES[alias]
+            spec = _model_spec(alias, runtime)
             started = time.perf_counter()
             try:
                 with stage_span("llm_generate", task_class=str(task_class), alias=alias):
@@ -346,8 +367,31 @@ def _extract_json_object(text: str) -> Any | None:
         return None
 
 
-def _real_provider_configured() -> bool:
-    return bool(settings.anthropic_api_key.get_secret_value())
+def _real_provider_configured(runtime: dict[str, Any] | None = None) -> bool:
+    provider = str((runtime or {}).get("provider", settings.llm_primary_provider))
+    if provider == "anthropic":
+        return bool(settings.anthropic_api_key.get_secret_value())
+    if provider == "groq":
+        return bool(settings.groq_api_key.get_secret_value())
+    return False
+
+
+def _model_spec(alias: str, runtime: dict[str, Any] | None = None) -> ModelSpec:
+    runtime = runtime or {}
+    provider = str(runtime.get("provider", settings.llm_primary_provider))
+    if alias == "deterministic" or provider == "stub":
+        return MODEL_ALIASES["deterministic"]
+    if provider == "groq":
+        names = {
+            "fast_small": str(runtime.get("fast_model", settings.groq_fast_model)),
+            "fast_realtime": str(runtime.get("fast_model", settings.groq_fast_model)),
+            "realtime_primary": str(runtime.get("realtime_model", settings.groq_realtime_model)),
+            "reasoning_primary": str(runtime.get("reasoning_model", settings.groq_primary_model)),
+            "reasoning_batch": str(runtime.get("reasoning_model", settings.groq_primary_model)),
+        }
+        base = GROQ_MODEL_ALIASES[alias]
+        return ModelSpec("groq", names[alias], base.input_cost_per_mtok, base.output_cost_per_mtok)
+    return MODEL_ALIASES[alias]
 
 
 def _budget_key() -> str:

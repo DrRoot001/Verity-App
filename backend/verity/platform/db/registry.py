@@ -20,6 +20,8 @@ MODEL_MODULES: tuple[str, ...] = (
     "verity.modules.preparation.models",
     "verity.modules.sessions.models",
     "verity.modules.sessions.live_models",
+    "verity.modules.admin.models",
+    "verity.modules.privacy.models",
 )
 
 

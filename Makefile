@@ -71,8 +71,12 @@ migration: ## Autogenerate a migration: make migration m="add x"
 	cd backend && .venv/bin/alembic revision --autogenerate -m "$(m)"
 
 .PHONY: seed
-seed: ## Load seed data (plans, entitlements, taxonomies)
+seed: ## Load operational defaults (never creates user accounts)
 	cd backend && .venv/bin/python -m verity.apps.cli seed
+
+.PHONY: bootstrap-admin
+bootstrap-admin: ## Create first admin: make bootstrap-admin email=... password=...
+	cd backend && .venv/bin/python -m verity.apps.cli bootstrap-admin --email "$(email)" --password "$(password)"
 
 # ── Run ─────────────────────────────────────────────────────────────
 .PHONY: api
@@ -82,6 +86,19 @@ api: ## Run the API with reload
 .PHONY: web
 web: ## Run the web app
 	cd web && pnpm dev
+
+# ── Desktop (PRD §17, Phase 12) ─────────────────────────────────────
+.PHONY: desktop
+desktop: ## Run the desktop assistant against the local API
+	cd desktop/src-tauri && cargo run --release
+
+.PHONY: desktop-build
+desktop-build: ## Build the desktop installer (.dmg + .app)
+	cd desktop/src-tauri && cargo tauri build
+
+.PHONY: desktop-test
+desktop-test: ## Run the desktop unit tests
+	cd desktop/src-tauri && cargo test
 
 # ── Verification ────────────────────────────────────────────────────
 .PHONY: lint

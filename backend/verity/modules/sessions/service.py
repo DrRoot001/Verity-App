@@ -7,6 +7,7 @@ plan reflects what actually went wrong (PRD §11.4, FR-MOCK-022).
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import uuid
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ from verity.modules.sessions.models import (
 from verity.modules.workspace.service import WorkspaceService
 from verity.platform.errors import AppError, ErrorCode
 from verity.platform.logging import get_logger
+from verity.platform.prompt_safety import untrusted
 
 log = get_logger("sessions.service")
 
@@ -108,6 +110,21 @@ class MockInterviewService:
         if session is None:
             raise AppError.not_found("Session")
         return session
+
+    async def list_for_user(self, *, user_id: uuid.UUID, limit: int = 25) -> list[MockSession]:
+        return list(
+            (
+                await self._session.execute(
+                    select(MockSession)
+                    .where(
+                        MockSession.user_id == user_id,
+                        MockSession.deleted_at.is_(None),
+                    )
+                    .order_by(MockSession.created_at.desc())
+                    .limit(min(limit, 100))
+                )
+            ).scalars()
+        )
 
     # ── Conversation ─────────────────────────────────────────────────
 
@@ -195,32 +212,43 @@ class MockInterviewService:
         )
 
         for attempt in range(2):
-            result = await self._gateway.generate(
-                task_class=TaskClass.MOCK_INTERVIEWER_TURN,
-                messages=prompt.render(
-                    role=bundle.opportunity.role_title,
-                    company=bundle.opportunity.company_name,
-                    stage=bundle.opportunity.stage,
-                    persona=session.persona,
-                    difficulty=decision.difficulty,
-                    themes=themes,
-                    asked="\n".join(f"- {q}" for q in state.asked[-8:]) or "(none yet)",
-                    last_answer=last_answer or "(no answer yet)",
-                ),
-                json_schema=prompt.output_schema,
-                max_output_tokens=300,
-                temperature=0.6 + 0.1 * attempt,
-                timeout_seconds=TURN_TIMEOUT_SECONDS,
-                user_id=session.user_id,
-                feature="mock_interview",
-            )
+            try:
+                result = await self._gateway.generate(
+                    task_class=TaskClass.MOCK_INTERVIEWER_TURN,
+                    messages=prompt.render(
+                        role=bundle.opportunity.role_title,
+                        company=bundle.opportunity.company_name,
+                        stage=bundle.opportunity.stage,
+                        persona=session.persona,
+                        difficulty=decision.difficulty,
+                        themes=themes,
+                        asked="\n".join(f"- {q}" for q in state.asked[-8:]) or "(none yet)",
+                        last_answer=untrusted(last_answer) if last_answer else "(no answer yet)",
+                    ),
+                    json_schema=prompt.output_schema,
+                    # One question plus a small JSON envelope. Set too low, the
+                    # object is truncated mid-write and fails schema validation
+                    # — which surfaces to the candidate as a dead interview.
+                    max_output_tokens=260,
+                    temperature=0.6 + 0.1 * attempt,
+                    timeout_seconds=TURN_TIMEOUT_SECONDS,
+                    user_id=session.user_id,
+                    feature="mock_interview",
+                )
+            except AppError as exc:
+                # A malformed or truncated model response must not end the
+                # interview. Retry once, then fall back to a real question.
+                log.info("interviewer_turn_failed", attempt=attempt, code=str(exc.code))
+                continue
+
             utterance = str(result.content.get("utterance", "")).strip()
             if utterance and not is_repeat(utterance, state.asked):
                 return utterance
             log.info("interviewer_question_rejected", reason="repeat_or_empty", attempt=attempt)
 
-        # Both attempts collided with something already asked; move on rather
-        # than repeat (FR-MOCK-004).
+        # Every attempt failed or collided with something already asked. Moving
+        # on beats repeating, and beats showing the candidate an error
+        # (FR-MOCK-004).
         return "Let's move to a different area. What work are you proudest of in this role?"
 
     async def submit_answer(
@@ -240,9 +268,9 @@ class MockInterviewService:
         prompt = registry.get("mock.answer.rubric")
         result = await self._gateway.generate(
             task_class=TaskClass.RUBRIC_EVALUATE_ANSWER,
-            messages=prompt.render(question=attempt.question_text, answer=answer),
+            messages=prompt.render(question=attempt.question_text, answer=untrusted(answer)),
             json_schema=prompt.output_schema,
-            max_output_tokens=400,
+            max_output_tokens=180,
             user_id=user_id,
             feature="mock_interview",
         )
@@ -258,6 +286,123 @@ class MockInterviewService:
 
         # Live feedback is withheld unless explicitly enabled (FR-MOCK-007).
         return attempt.scores if session.live_feedback else {}
+
+    async def answer_and_advance(
+        self, *, user_id: uuid.UUID, session_id: uuid.UUID, answer: str, duration_seconds: int
+    ) -> tuple[dict[str, Any], Turn]:
+        """Score the answer and ask the next question, concurrently.
+
+        Run in sequence these cost the candidate the sum of two model calls —
+        roughly 1.6 s of silence after every answer, which is what makes a
+        spoken interview feel like software. They do not actually depend on
+        each other: the interviewer prompt is given the answer itself and is
+        already instructed to probe a thin one, so it does not need the rubric
+        to decide what to ask.
+
+        What the rubric still drives is *difficulty*, and that now moves one
+        turn later than it used to. That lag is invisible in conversation and
+        cheap next to halving the gap between turns.
+
+        Only the two model calls overlap. Everything touching the database stays
+        strictly sequential, because an ``AsyncSession`` is not safe to use from
+        two tasks at once.
+        """
+        session = await self.get(user_id=user_id, session_id=session_id)
+        if session.status == SessionStatus.COMPLETED:
+            raise AppError(ErrorCode.SESSION_NOT_ACTIVE, "This interview has already finished.")
+
+        attempt = await self._last_attempt(session.id)
+        if attempt is None:
+            raise AppError(ErrorCode.INVALID_STATE_TRANSITION, "There's no question to answer yet.")
+
+        attempt.answer_text = answer
+        attempt.duration_seconds = duration_seconds
+        attempt.delivery = delivery.analyze(answer, duration_seconds).to_json()
+        question_text = attempt.question_text
+
+        state = InterviewerState.from_json(session.interviewer_state)
+        bundle = await self._workspaces.context(user_id=user_id, workspace_id=session.workspace_id)
+
+        # Decided from the rubric of the *previous* turn, which is what makes
+        # the overlap possible.
+        decision = decide_next_turn(
+            state=state,
+            persona=session.persona,
+            last_scores=attempt.scores or None,
+            elapsed_seconds=self._elapsed_seconds(session),
+            planned_seconds=session.planned_duration_seconds,
+            max_questions=MAX_QUESTIONS_PER_SESSION,
+        )
+
+        scored, utterance = await asyncio.gather(
+            self._score_answer(question_text, answer, user_id),
+            self._wrapup_or_question(session, bundle, state, decision, answer),
+        )
+
+        attempt.scores = scored
+        state = record_answer_score(state, scored)
+        state = apply_turn(state, decision, utterance)
+        session.interviewer_state = state.to_json()
+
+        await self._append_transcript(session, SpeakerRole.CANDIDATE, answer)
+        await self._append_transcript(session, SpeakerRole.INTERVIEWER, utterance)
+
+        if decision.intent is not TurnIntent.WRAPUP:
+            self._session.add(
+                QuestionAttempt(
+                    user_id=user_id,
+                    session_id=session.id,
+                    session_kind="mock",
+                    workspace_id=session.workspace_id,
+                    sequence=await self._next_attempt_sequence(session.id),
+                    question_text=utterance,
+                    intent=str(decision.intent),
+                    category=session.mode,
+                    prompt_ref=registry.get("mock.interviewer.turn").ref,
+                )
+            )
+        await self._session.flush()
+
+        turn = Turn(
+            utterance=utterance,
+            intent=str(decision.intent),
+            expects_answer=decision.intent is not TurnIntent.WRAPUP,
+            sequence=state.question_count,
+            difficulty=decision.difficulty,
+            reason=decision.reason,
+        )
+        # Live feedback is withheld unless explicitly enabled (FR-MOCK-007).
+        return (scored if session.live_feedback else {}), turn
+
+    async def _wrapup_or_question(
+        self, session: MockSession, bundle: Any, state: InterviewerState, decision: Any, answer: str
+    ) -> str:
+        if decision.intent is TurnIntent.WRAPUP:
+            return (
+                "That's everything I wanted to cover. Thanks for your time — "
+                "do you have questions for me?"
+            )
+        return await self._generate_question(
+            session=session, bundle=bundle, state=state, decision=decision, last_answer=answer
+        )
+
+    async def _score_answer(self, question: str, answer: str, user_id: uuid.UUID) -> dict[str, Any]:
+        prompt = registry.get("mock.answer.rubric")
+        try:
+            result = await self._gateway.generate(
+                task_class=TaskClass.RUBRIC_EVALUATE_ANSWER,
+                messages=prompt.render(question=question, answer=untrusted(answer)),
+                json_schema=prompt.output_schema,
+                max_output_tokens=180,
+                user_id=user_id,
+                feature="mock_interview",
+            )
+            return dict(result.content)
+        except AppError as exc:
+            # A failed score costs the report some detail. It must never stop
+            # the interview.
+            log.info("answer_scoring_failed", code=str(exc.code))
+            return {}
 
     # ── Completion and report ────────────────────────────────────────
 
@@ -415,6 +560,10 @@ class MockInterviewService:
             content=content,
         )
         self._session.add(segment)
+        # Flush before returning: the sequence is derived from a MAX() over
+        # rows already in the table, so two appends in one unit of work would
+        # otherwise both claim the same seq and collide on the unique index.
+        await self._session.flush()
         return segment
 
     async def _next_attempt_sequence(self, session_id: uuid.UUID) -> int:

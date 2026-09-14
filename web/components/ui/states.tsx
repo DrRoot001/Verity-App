@@ -1,3 +1,4 @@
+/* eslint-disable max-lines */
 /**
  * The eleven UX states as primitives (PRD §10.1).
  *
@@ -52,12 +53,7 @@ function StateShell({
         ) : null}
       </div>
       {action ? (
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={action.onClick}
-          href={action.href}
-        >
+        <Button variant="secondary" size="sm" onClick={action.onClick} href={action.href}>
           {action.label}
         </Button>
       ) : null}
@@ -103,7 +99,7 @@ export function ErrorState({
   requestId?: string | null;
   recovery?: { type: string; target?: string | null; label?: string | null };
 }) {
-  const resolved = recovery ? recoveryToAction(recovery) ?? action : action;
+  const resolved = recovery ? (recoveryToAction(recovery) ?? action) : action;
   return (
     <div className="space-y-2">
       <StateShell
@@ -162,7 +158,15 @@ export function Partial({ missing, onRetry }: { missing: string; onRetry?: () =>
   );
 }
 
-export function PermissionDenied({ what, how, target }: { what: string; how: string; target?: string }) {
+export function PermissionDenied({
+  what,
+  how,
+  target,
+}: {
+  what: string;
+  how: string;
+  target?: string;
+}) {
   return (
     <StateShell
       title={`${what} permission is needed`}
@@ -221,7 +225,13 @@ export function SubscriptionLocked({
 }
 
 /** Data older than its freshness SLA must say so (PRD FR-DOC-021). */
-export function Stale({ retrievedAt, onRefresh }: { retrievedAt: string; onRefresh?: () => void }) {
+export function Stale({
+  retrievedAt,
+  onRefresh,
+}: {
+  retrievedAt: string;
+  onRefresh?: () => void;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 rounded-[var(--radius-control)] border border-[var(--color-border-subtle)] bg-[var(--color-raised)] px-4 py-2 text-sm">
       <span className="text-[var(--color-text-secondary)]">

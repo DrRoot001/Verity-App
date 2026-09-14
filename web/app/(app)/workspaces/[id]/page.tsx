@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Empty, ErrorState, Loading, Partial } from "@/components/ui/states";
 import { getContext } from "@/features/workspace/api";
+import { WorkspaceNav } from "@/features/workspace/nav";
 import { ApiError } from "@/lib/api/client";
 import type { ContextBundle, MatchStatus, RequirementMatch } from "@/lib/api/types";
 
@@ -61,6 +62,7 @@ export default function WorkspacePage({ params }: { params: Promise<{ id: string
 
   return (
     <div className="space-y-8">
+      <WorkspaceNav id={id} />
       <header className="space-y-2">
         <h1 className="text-2xl">{opportunity.role_title}</h1>
         <p className="text-[var(--color-text-secondary)]">{opportunity.company_name}</p>
@@ -72,9 +74,16 @@ export default function WorkspacePage({ params }: { params: Promise<{ id: string
           </Badge>
           <Badge tone="neutral">{`context v${bundle.version}`}</Badge>
         </div>
-        <div className="pt-1">
+        <div className="flex flex-wrap gap-2 pt-2">
           <Button size="sm" href={`/workspaces/${bundle.workspace_id}/preparation`}>
             Preparation plan
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            href={`/sessions?workspace=${bundle.workspace_id}`}
+          >
+            Start interview
           </Button>
         </div>
       </header>
@@ -131,15 +140,21 @@ export default function WorkspacePage({ params }: { params: Promise<{ id: string
                       {experience.title} · {experience.company}
                     </p>
                     <p className="text-xs text-[var(--color-text-muted)]">
-                      {experience.start ?? "—"} to {experience.is_current ? "present" : (experience.end ?? "—")}
+                      {experience.start ?? "—"} to{" "}
+                      {experience.is_current ? "present" : (experience.end ?? "—")}
                     </p>
                     {experience.achievements.length > 0 ? (
                       <ul className="mt-1 space-y-1">
                         {experience.achievements.map((achievement) => (
-                          <li key={achievement.id} className="text-sm text-[var(--color-text-secondary)]">
+                          <li
+                            key={achievement.id}
+                            className="text-sm text-[var(--color-text-secondary)]"
+                          >
                             {achievement.statement}
                             {achievement.has_metric ? (
-                              <span className="ml-2 text-xs text-[var(--color-positive)]">quantified</span>
+                              <span className="ml-2 text-xs text-[var(--color-positive)]">
+                                quantified
+                              </span>
                             ) : null}
                           </li>
                         ))}

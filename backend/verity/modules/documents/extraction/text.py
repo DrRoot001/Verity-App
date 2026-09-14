@@ -13,6 +13,7 @@ import re
 import zipfile
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 from verity.platform.errors import AppError, ErrorCode, RecoveryAction
 from verity.platform.logging import get_logger
@@ -228,10 +229,37 @@ def _extract_pdf(data: bytes) -> tuple[str, int, list[str]]:
     chunks: list[str] = []
     for page in pages:
         try:
-            chunks.append(page.extract_text() or "")
+            chunks.append(_page_text(page))
         except Exception:
             warnings.append("page_extraction_failed")
-    return "\n".join(chunks), len(pages), warnings
+
+    text = "\n".join(chunks)
+    if text.strip() and text.count("\n") < len(pages):
+        # Every downstream parser is line-based: sections, role headers and
+        # bullets are all recognised by their own line. A page that arrives as
+        # one continuous string yields zero facts while looking like a success,
+        # so say it rather than silently extracting nothing.
+        warnings.append("no_line_structure")
+    return text, len(pages), warnings
+
+
+def _page_text(page: Any) -> str:
+    """Extract one page, preferring the layout-preserving mode.
+
+    pypdf's default mode emits text in content-stream order with no line
+    breaks for PDFs whose generator positions each span absolutely — common in
+    resumes exported from design tools. ``layout`` mode reconstructs the visual
+    rows, which is what makes the text parseable. It is the slower path and can
+    raise on unusual pages, so the default mode remains the fallback.
+    """
+    try:
+        text = page.extract_text(extraction_mode="layout") or ""
+    except Exception:
+        text = ""
+
+    if text.count("\n") >= 1:
+        return text
+    return page.extract_text() or ""
 
 
 def _extract_docx(data: bytes) -> tuple[str, int, list[str]]:

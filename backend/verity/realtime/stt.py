@@ -313,6 +313,143 @@ class SttRouter:
         return results
 
 
+class GroqWhisperSTT:
+    """Whisper on Groq, reusing the key the gateway already holds (PRD §23).
+
+    Chosen because it needs no second vendor account: the same credential that
+    routes generation also transcribes. Groq exposes Whisper over the
+    OpenAI-compatible ``/audio/transcriptions`` route, which is batch rather
+    than streaming, so audio is accumulated into short utterances instead of
+    streamed frame by frame.
+
+    The buffering window is the whole design tradeoff. Too short and Whisper
+    receives half a sentence and guesses; too long and the candidate waits.
+    Speech is flushed once the speaker has paused, with a hard ceiling so a
+    monologue still produces text on the way through.
+    """
+
+    name = "groq_whisper"
+
+    #: Flush after this much silence — a natural clause break, not a full stop.
+    SILENCE_FLUSH_MS = 700
+    #: Never hold more than this before transcribing anyway.
+    MAX_UTTERANCE_MS = 12_000
+    #: Minimum *voiced* audio before a flush is worth paying for. Measured on
+    #: speech, not on buffer length: a cough followed by a long silence holds a
+    #: full second of audio while containing nothing anyone said.
+    MIN_UTTERANCE_MS = 400
+
+    def __init__(self, api_key: str, *, model: str = "whisper-large-v3-turbo") -> None:
+        if not api_key:
+            raise AppError.internal("Groq transcription is missing its API key.")
+        self._api_key = api_key
+        self._model = model
+        self._buffers: dict[str, bytearray] = {}
+        self._started: dict[str, int] = {}
+        self._last_voice: dict[str, int] = {}
+        self._voiced_ms: dict[str, int] = {}
+
+    def capabilities(self) -> SttCapabilities:
+        return SttCapabilities(
+            diarization=False,
+            partial_results=False,
+            punctuation=True,
+            languages=frozenset({"en", "es", "fr", "de", "pt", "hi", "ja", "zh"}),
+            typical_partial_latency_ms=900,
+        )
+
+    async def transcribe(self, channel: str, pcm: bytes, timestamp_ms: int) -> list[SttResult]:
+        buffer = self._buffers.setdefault(channel, bytearray())
+        if not buffer:
+            self._started[channel] = timestamp_ms
+        buffer.extend(pcm)
+
+        chunk_ms = (len(pcm) // 2) * 1000 // SAMPLE_RATE
+        if frame_rms(pcm) >= SILENCE_RMS_THRESHOLD:
+            self._last_voice[channel] = timestamp_ms
+            self._voiced_ms[channel] = self._voiced_ms.get(channel, 0) + chunk_ms
+
+        started = self._started.get(channel, timestamp_ms)
+        held_ms = timestamp_ms - started
+        quiet_ms = timestamp_ms - self._last_voice.get(channel, started)
+        voiced_ms = self._voiced_ms.get(channel, 0)
+
+        speaker_paused = quiet_ms >= self.SILENCE_FLUSH_MS
+        if not speaker_paused and held_ms < self.MAX_UTTERANCE_MS:
+            return []
+
+        payload = bytes(buffer)
+        buffer.clear()
+        self._started.pop(channel, None)
+        self._voiced_ms.pop(channel, None)
+
+        # Too little was actually said to be a question. Dropping it here is
+        # what keeps a quiet room from billing for its own silence.
+        if voiced_ms < self.MIN_UTTERANCE_MS:
+            return []
+
+        text, confidence = await self._post(payload)
+        if not text:
+            return []
+        return [
+            SttResult(
+                event=SttEvent.FINAL,
+                content=text,
+                channel=channel,
+                start_ms=started,
+                end_ms=timestamp_ms,
+                confidence=confidence,
+            )
+        ]
+
+    async def _post(self, pcm: bytes) -> tuple[str, float | None]:
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                response = await client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {self._api_key}"},
+                    files={"file": ("audio.wav", wav_bytes(pcm), "audio/wav")},
+                    data={
+                        "model": self._model,
+                        "response_format": "json",
+                        "temperature": "0",
+                    },
+                )
+        except Exception as exc:
+            raise AppError(ErrorCode.STT_UNAVAILABLE, "Transcription is unavailable.") from exc
+
+        if response.status_code >= 400:
+            raise AppError(
+                ErrorCode.STT_UNAVAILABLE,
+                "The transcription provider rejected the request.",
+                detail={"status": response.status_code},
+            )
+
+        body = response.json()
+        return str(body.get("text", "")).strip(), None
+
+
+def wav_bytes(pcm: bytes, *, sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Wrap raw PCM16 mono in a WAV container.
+
+    Whisper endpoints want a container, not headerless samples, and building
+    the 44-byte header here avoids a dependency for what is a fixed layout.
+    """
+    import struct
+
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(pcm))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, sample_rate, sample_rate * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(pcm))
+        + pcm
+    )
+
+
 def build_stt_router() -> SttRouter:
     """Select providers from configuration."""
     providers: list[STTProvider] = []
@@ -320,6 +457,12 @@ def build_stt_router() -> SttRouter:
     deepgram_key = getattr(settings, "deepgram_api_key", None)
     if settings.stt_primary_provider == "deepgram" and deepgram_key:
         providers.append(DeepgramSTT(deepgram_key.get_secret_value()))
+
+    # Groq needs no separate account: the generation key transcribes too, which
+    # is what makes live audio work out of the box rather than after a signup.
+    groq_key = getattr(settings, "groq_api_key", None)
+    if groq_key and settings.stt_primary_provider in ("groq", "null", ""):
+        providers.append(GroqWhisperSTT(groq_key.get_secret_value()))
 
     # Always last in the chain: text mode is the floor the session degrades to.
     providers.append(TextPassthroughSTT())

@@ -44,7 +44,13 @@ export function CardHeader({
   );
 }
 
-export function CardBody({ children, tight = false }: { children: ReactNode; tight?: boolean }) {
+export function CardBody({
+  children,
+  tight = false,
+}: {
+  children: ReactNode;
+  tight?: boolean;
+}) {
   return <div className={tight ? "px-5 py-3" : "px-5 py-4"}>{children}</div>;
 }
 

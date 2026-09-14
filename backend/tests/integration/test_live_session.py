@@ -297,7 +297,7 @@ async def test_generation_is_capped_per_session(db: AsyncSession, user: User) ->
     engine = await _engine(db, user)
     engine.session.generation_count = settings.session_max_generations
 
-    allowed, reason = engine.can_generate()
+    allowed, reason = await engine.can_generate()
     assert allowed is False
     assert reason is not None and "cap" in reason
 
@@ -308,7 +308,7 @@ async def test_generation_is_rate_limited_per_minute(db: AsyncSession, user: Use
     for _ in range(settings.session_max_generations_per_minute):
         engine.record_generation()
 
-    allowed, reason = engine.can_generate()
+    allowed, reason = await engine.can_generate()
     assert allowed is False
     assert reason == "generation rate limit"
 

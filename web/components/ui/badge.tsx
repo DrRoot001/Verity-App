@@ -95,7 +95,13 @@ const ICON = "size-3";
 function Check() {
   return (
     <svg viewBox="0 0 12 12" className={ICON} fill="none">
-      <path d="M2.5 6.5 5 9l4.5-6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M2.5 6.5 5 9l4.5-6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -103,7 +109,12 @@ function Check() {
 function Cross() {
   return (
     <svg viewBox="0 0 12 12" className={ICON} fill="none">
-      <path d="m3 3 6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path
+        d="m3 3 6 6M9 3l-6 6"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
     </svg>
   );
 }

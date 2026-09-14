@@ -136,7 +136,10 @@ export default function ReviewPage() {
               {pasting ? (
                 <Processing stages={INGEST_STAGES} currentStage="Extracting entities" />
               ) : (
-                <Button onClick={() => void importResume()} disabled={draft.trim().length < 100}>
+                <Button
+                  onClick={() => void importResume()}
+                  disabled={draft.trim().length < 100}
+                >
                   Import resume
                 </Button>
               )}

@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from verity.modules.identity.dependencies import CurrentUser, SessionDep, VerifiedUser
 from verity.modules.sessions.service import MockInterviewService
+from verity.platform.errors import AppError, ErrorCode
+from verity.platform.runtime_config import feature_enabled
 
 mock_router = APIRouter(prefix="/v1/mock-sessions", tags=["mock-sessions"])
 
@@ -110,6 +112,8 @@ def _report_response(report: Any) -> ReportResponse:
 async def create_session(
     payload: SessionCreate, principal: VerifiedUser, session: SessionDep
 ) -> SessionResponse:
+    if not await feature_enabled("mock_interviews", user_id=principal.user.id):
+        raise AppError(ErrorCode.FORBIDDEN, "Mock interviews are temporarily unavailable.")
     created = await MockInterviewService(session).create(
         user_id=principal.user.id,
         workspace_id=payload.workspace_id,
@@ -120,6 +124,14 @@ async def create_session(
         live_feedback=payload.live_feedback,
     )
     return _session_response(created)
+
+
+@mock_router.get("", response_model=list[SessionResponse])
+async def list_sessions(
+    principal: CurrentUser, session: SessionDep, limit: int = 25
+) -> list[SessionResponse]:
+    rows = await MockInterviewService(session).list_for_user(user_id=principal.user.id, limit=limit)
+    return [_session_response(row) for row in rows]
 
 
 @mock_router.get("/{session_id}", response_model=SessionResponse)
@@ -155,13 +167,30 @@ async def submit_answer(
     principal: VerifiedUser,
     session: SessionDep,
 ) -> dict[str, Any]:
-    """Returns scores only when live feedback was enabled (FR-MOCK-007)."""
-    return await MockInterviewService(session).submit_answer(
+    """Score the answer and return the next turn in one round trip.
+
+    Scoring and question generation are strictly sequential — difficulty and
+    the probe decision both read the rubric — so splitting them across two
+    requests bought nothing and cost the candidate an extra round trip plus a
+    CORS preflight in the middle of a spoken interview. ``scores`` is still
+    withheld unless live feedback was enabled (FR-MOCK-007).
+    """
+    scores, turn = await MockInterviewService(session).answer_and_advance(
         user_id=principal.user.id,
         session_id=session_id,
         answer=payload.answer,
         duration_seconds=payload.duration_seconds,
     )
+    return {
+        "scores": scores,
+        "next_turn": {
+            "utterance": turn.utterance,
+            "intent": turn.intent,
+            "expects_answer": turn.expects_answer,
+            "sequence": turn.sequence,
+            "difficulty": turn.difficulty,
+        },
+    }
 
 
 @mock_router.post("/{session_id}/end", response_model=ReportResponse)

@@ -18,6 +18,11 @@ cpal = "0.15"
 reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 anyhow = "1"
 pdf-extract = "0.12"
+# Already pulled in transitively (reqwest); declared directly because
+# extract_document_text decodes the base64 payload the frontend sends
+# instead of a raw byte array, which a multi-MB PDF made ~4x heavier over
+# IPC and gave no progress feedback while it serialized.
+base64 = "0.22"
 
 # ScreenCaptureKit-based native system-audio capture. Opt-in via the
 # `native-system-audio` feature (see [features] below), not a plain

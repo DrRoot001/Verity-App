@@ -4,9 +4,12 @@ A standalone, always-on-top window that listens to a real interview and streams
 an answer you can adapt while you respond. It has no login, signup, Verity web
 account, workspace, database, or backend dependency.
 
-Audio is segmented locally after a short pause, transcribed directly with Groq
-Whisper, and answered through Groq streaming chat. You supply one or more Groq API keys in
-the desktop app or through `VERITY_GROQ_API_KEY`/`GROQ_API_KEY`.
+Audio is segmented locally after a short pause and transcribed directly with
+Groq Whisper — that part always uses Groq. Who writes the suggested answer is
+your choice: Groq, OpenAI, Anthropic (Claude), or Google Gemini, picked in
+Advanced settings. You supply one or more Groq API keys in the desktop app or
+through `VERITY_GROQ_API_KEY`/`GROQ_API_KEY`; a non-Groq answer provider needs
+its own key, entered in the same settings panel.
 
 ---
 
@@ -34,7 +37,7 @@ Then the platform-specific pieces:
 Verify the toolchain before building:
 
 ```bash
-cd desktop/src-tauri && cargo tauri info
+cd src-tauri && cargo tauri info
 ```
 
 ---
@@ -99,13 +102,84 @@ reselect the speaker in the call app's own audio settings.
 
 ---
 
+## When nothing is being transcribed
+
+Every capture failure looks the same from the HUD: it sits there and no
+question appears. That covers several unrelated causes, and fixing the wrong
+one wastes a build cycle, so work through these in order.
+
+### 1. Rule out the machine itself, with no Verity code involved
+
+`audio-probe` opens a device with the same primitive Verity uses (`cpal`) and
+prints a live RMS meter — no API key, no network, none of Verity's own code in
+the path. It ships in the same CI artifact as the installer
+(`audio-probe.exe` on Windows), or build it yourself:
+
+```bash
+cargo run --release --manifest-path audio-probe/Cargo.toml
+```
+
+```
+audio-probe            # capture the default output device (system audio)
+audio-probe --list     # just enumerate what this machine exposes
+audio-probe 3          # capture device 3 from that list
+```
+
+Play the interviewer's audio while it runs and read the meter:
+
+| What you see | What it means |
+|---|---|
+| **RMS moves, "capture WORKS"** | The machine is fine. Continue to step 2 — this same device, selected inside Verity, is now the thing to test. |
+| **"opened but delivered SILENCE"** | The device opened but carries no audio. The call is almost certainly playing through a *different* device — re-run against the other numbers, especially your headphones. |
+| **"could not capture this device"** | That endpoint cannot be opened at all. Try another number from the list. |
+| **No devices listed** | The OS sees no sound hardware. |
+
+### 2. If the probe works but Verity still shows nothing
+
+Verity writes its own append-only log next to `desktop-preferences.json`:
+
+| Platform | Location |
+|---|---|
+| Windows | `%APPDATA%\dev.verity.assistant\debug.log` |
+| macOS | `~/Library/Application Support/dev.verity.assistant/debug.log` |
+
+It records, for every session: the exact device string the Start button sent,
+whether the stream opened or the specific error if it didn't, and whether the
+realtime capture callback ever delivered a single message. Reproduce the
+failure, then open that file — the last few lines say exactly which of those
+three failed, which is the difference between "select a different device" and
+"file a bug."
+
+### 3. If the transcript contains both your own voice and the interviewer's
+
+Verity has no speaker separation — it transcribes whatever is in the captured
+stream, whichever voice that is. If your own words show up mixed into the
+same transcript as the interviewer's, the stream being captured already
+contains both, before Verity ever sees it. That is a Windows/driver setting,
+not something app code can filter after the fact:
+
+- **Windows: check "Listen to this device."** Sound Control Panel → Recording
+  tab → your microphone → Properties → Listen. If enabled, Windows plays your
+  mic back through your speakers in real time — which loopback then dutifully
+  captures right alongside the interviewer. Turn it off.
+- Confirm you are actually on the loopback/system-audio device, not the
+  microphone (check the label in the Interview audio dropdown, or `debug.log`
+  from step 2). On the microphone, picking up both voices is expected: it
+  hears you directly and the interviewer through your speakers, exactly as
+  the table at the top of this README describes.
+- A headset removes the acoustic path entirely (nothing to bleed from
+  speaker to mic in the first place), so it is the most reliable fix when
+  the above doesn't resolve it.
+
+---
+
 ## Running it
 
 No backend or database is needed. Launch Verity from `/Applications`, or in
 development:
 
 ```bash
-cd desktop/src-tauri && cargo run --release
+cd src-tauri && cargo run --release
 ```
 
 Optionally provide the key through the shell instead of the UI:
@@ -118,11 +192,26 @@ VERITY_GROQ_API_KEY=gsk_... cargo run --release
 
 ## Building the installer
 
+### Easiest: let GitHub build it
+
+You do not need a toolchain at all. This repo has a workflow that builds on
+real Windows and macOS machines:
+
+1. Open the **Actions** tab → **Build** → **Run workflow** (it also runs on
+   every push to `main`).
+2. When it finishes, open the run and download from **Artifacts**:
+   - `verity-windows` — the `.exe` installer and `.msi`
+   - `verity-macos` — the `.dmg`
+
+Artifacts are zipped by GitHub, so unzip before running the installer.
+
+### Building locally
+
 Build on the OS you are targeting — Tauri does not cross-compile the installer,
 because each platform's bundler needs that platform's own tooling.
 
 ```bash
-cd desktop/src-tauri && cargo tauri build
+cd src-tauri && cargo tauri build
 ```
 
 ### Windows
@@ -160,13 +249,61 @@ To sign later, set `APPLE_CERTIFICATE`, `APPLE_ID` and `APPLE_TEAM_ID` and add a
 
 ## Using it in an interview
 
-1. Paste one or more Groq API keys, one per line, and test the connection. They stay in this Mac's local Verity preferences and rotate on auth, rate-limit, or service failures.
+1. Paste one or more Groq API keys, one per line, and test the connection. They stay in this machine's local Verity preferences, rotate on auth/rate-limit/service failures, and always handle transcription regardless of which provider answers.
 2. Add the role/company and paste or import the resume and job description. PDF, TXT, and Markdown are supported.
 3. Choose the interview audio source. A loopback device is recommended.
-4. Press **Start live assistant**, then position the HUD beside your call.
+4. *(Optional)* In **Advanced settings**, pick an **Answer provider** other than Groq — OpenAI, Anthropic, Gemini, or Amazon Bedrock — paste that provider's own key(s), and test the connection. Leave it on Groq to reuse the keys from step 1.
+5. Press **Start live assistant**, then position the HUD beside your call.
 
 The window stays above full-screen video calls. **Pinned** toggles that off if
 you need it to behave like a normal window.
+
+### Choosing an answer provider
+
+There is no auto-detection of key type from its format — the **Answer
+provider** dropdown is the one place this is chosen, and the key field
+below it is only for whichever provider is currently selected.
+
+| Provider | Needs its own key | Default model |
+|---|---|---|
+| Groq | No — reuses the keys above | `openai/gpt-oss-20b` |
+| OpenAI | Yes | `gpt-4o-mini` |
+| Anthropic (Claude) | Yes | `claude-haiku-4-5-20251001` |
+| Google Gemini | Yes | `gemini-2.0-flash` |
+| Amazon Bedrock | Yes — an [API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html), not an AWS access key/secret pair | `amazon.nova-lite-v1:0` |
+
+Every provider streams into the same HUD through the same events — switching
+providers changes nothing else about how Verity behaves — with one exception:
+**Bedrock's answer arrives as a single block, not token-by-token.** Its real
+streaming API returns AWS's own binary frame format rather than the plain
+text every other provider here uses, and that was never verified against a
+real successful response while building this, so Verity calls its regular
+(non-streaming) endpoint instead. For a 160-token answer the practical delay
+is under a second — but it is a real, deliberate difference from the rest.
+
+The **Answer model** field is free text, so any model the selected provider
+hosts works, not only the default.
+
+#### Amazon Bedrock: model access is a separate AWS step
+
+A Bedrock bearer-token key authenticates you, but by itself grants no model
+access — the console list won't tell you this, but your **first Bedrock
+request will fail even with a perfectly valid key** if no model has been
+enabled. Fixed at [AWS Bedrock console → Model access][bedrock-model-access],
+not in this app. Until at least one model is enabled there, every request
+fails with `Operation not allowed`, which looks identical to a bad key but
+isn't one — verified live: the same key correctly listed 90 available models
+via Bedrock's own models endpoint while every single invoke attempt was
+rejected, which is what an auth-is-fine-but-nothing-is-enabled account looks
+like.
+
+[bedrock-model-access]: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html
+
+Requests per detected question: exactly one transcription call and one answer
+call, regardless of provider — plus one extra answer call per API key skipped
+on a retryable failure (rate limit, auth, 5xx). A silent, sub-threshold pause
+never triggers a request at all; segmentation only fires once
+`SILENCE_FLUSH_MS` of quiet follows at least `MIN_VOICE_MS` of real speech.
 
 ### Screen-capture protection
 
@@ -221,12 +358,12 @@ pause are outside the application’s control.
 ## Layout
 
 ```
-desktop/
-  src-tauri/
-    src/main.rs      window, commands, wiring
-    src/audio.rs     device enumeration, capture, resampling to 16 kHz mono
-    src/session.rs   local VAD, Groq Whisper, streamed Groq answers
-  ui/                the HUD itself (no build step — plain HTML/CSS/JS)
+src-tauri/
+  src/main.rs        window, commands, wiring
+  src/audio.rs       device enumeration, capture, resampling to 16 kHz mono
+  src/session.rs     local VAD, Groq Whisper, streamed Groq answers
+  src/platform.rs    per-OS capability detection
+ui/                  the HUD itself (no build step — plain HTML/CSS/JS)
 ```
 
 Groq keys are never sent to the Verity web application. They are used only for

@@ -4,7 +4,20 @@ Maps PRD requirements to implementation status. Source of truth for scope: `PRD.
 
 **Status legend:** `DONE` (implemented + verified) · `IN PROGRESS` · `BLOCKED` · `NOT STARTED`
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
+
+**Provider update:** Groq Chat Completions is integrated through `AIGateway`
+with configurable GPT-OSS production-model aliases, structured-output support,
+streaming, usage metering, and deterministic local fallback when no key is set.
+
+**Frontend completion pass:** responsive candidate/staff shells, vector brand,
+profile/resume/story authoring, workspace tabs, mock interview room, live text
+HUD, session history/reports, device/privacy settings, and database-backed admin
+operations (users, staff/RBAC, sessions, AI routing/budgets, flags, prompt
+versions, and audit history)
+routes are implemented. Real Groq smoke tests recorded a 951 ms mock turn and a
+2.25 s grounded live answer on the local/free-tier path; these are development
+measurements, not production SLO evidence.
 
 ---
 
@@ -113,15 +126,86 @@ lifespan startup (`platform/db/session.py::warm_pool`); cold probe now returns `
 | 7 — Realtime infrastructure | weeks 21–25 | **DONE** — engine, event sourcing + replay, VAD, STT failover, WebSocket transport with ticket auth; AC-RT-010 passes |
 | 8 — Question detection & context | weeks 25–28 | **DONE** — signal fusion, classification, memory, token-budgeted assembly |
 | 9 — Copilot answer engine | weeks 28–31 | **DONE** — dual-lane generation, grounding validator, response modes; AC-COP-002 passes |
-| 10 — Reports & the loop | weeks 31–33 | NOT STARTED |
-| 11 — Billing & entitlements | weeks 33–35 | NOT STARTED |
-| 12 — Desktop application | weeks 30–36 | NOT STARTED |
-| 13 — Admin & operations | weeks 35–38 | NOT STARTED |
-| 14 — Reliability hardening | weeks 38–41 | NOT STARTED |
+| 10 — Reports & the loop | weeks 31–33 | **DONE** — live coverage report, session history, live weakness → prep mutation; AC-WS-002 passes |
+| 11 — Billing & entitlements | weeks 33–35 | **DEFERRED** — descoped by the product owner |
+| 12 — Desktop application | weeks 30–36 | **IN PROGRESS** — standalone Tauri HUD, local preferences, direct Groq pipeline, multi-key failover, resume/job context, menu-bar lifecycle, persisted capture protection, and macOS fullscreen visibility are implemented; signed distribution and capture-client E2E remain blocked |
+| 13 — Admin & operations | weeks 35–38 | **DONE** — staff RBAC, audit trail, metrics, session diagnostics, operations UI |
+| 14 — Reliability hardening | weeks 38–41 | **PARTIAL** — AC-PRIV-001 passes (verified deletion pipeline + export). Load/chaos/restore drills need infrastructure this environment does not have |
 | 15 — Launch gates | weeks 41–43 | NOT STARTED |
 | 16 — P1 features | post-GA | NOT STARTED |
 
 ---
+
+## Desktop HUD capture protection (2026-08-17)
+
+Implemented for the Live Interview HUD with Tauri
+`WebviewWindow::set_content_protected`. Protection defaults on when preferences
+are missing or malformed. The pre-sign-in/setup checkbox and active-HUD button
+apply changes to the current native window immediately and persist them in
+`desktop-preferences.json`. The HUD also joins all macOS Spaces so it remains
+visible over a full-screen call window.
+
+macOS implementation inspected in the resolved dependency versions used by
+this build: Tauri `2.11.5` / `tauri-runtime-wry 2.11.4` delegates to Tao
+`0.35.3`, which calls `NSWindow.setSharingType(NSWindowSharingNone)` when
+enabled and `NSWindowSharingReadOnly` when disabled.
+
+Runtime host: **macOS 12.7.6 (21H1320)**. Verification was executed against the
+debug application on 2026-08-17:
+
+| Scenario | Exact result |
+|---|---|
+| Normal desktop usage | **PASS (visibility)** — CoreGraphics reported the 420 x 620 HUD on-screen with alpha 1 at floating layer 5 while protection was enabled. The HUD remains an ordinary visible app/process. |
+| Full-screen Zoom/Meet-style window | **PASS (visibility only)** — the HUD stayed on-screen at the same bounds before and during a real full-screen Google Chrome window after joining all Spaces. Chrome was returned from full-screen after the test. |
+| Screenshot | **BLOCKED / INCONCLUSIVE for exclusion** — the automation shell lacks macOS Screen Recording permission. `screencapture` omitted all application windows, including Finder/Notes controls, so the resulting image cannot prove HUD-specific exclusion. A native Cmd+Shift+3 event was also sent while the HUD was confirmed on-screen, but the configured screenshot destination received no new file. |
+| macOS screen recording | **BLOCKED** — `screencapture -v -V3` returned `capture error The operation could not be completed` and produced no recording. |
+| Individual-window capture/share path | **BLOCKED** — `screencapture -l <HUD window id>` returned `could not create image from window`. Without Screen Recording permission, this does not distinguish protection from TCC denial. |
+| Full-screen screen share | **NOT VERIFIED** — no live Zoom/Meet share session was available to inspect from a second participant. Fullscreen HUD visibility passed; capture exclusion did not. |
+| Individual-window sharing in Zoom/Meet | **NOT VERIFIED** — no live client/share recipient was available. AppKit sharing protection is configured, but a picker/result was not observed. |
+| Setting persistence | **PASS (automated)** — Rust tests cover default-on, malformed-file fail-closed, and an explicit disabled-value round trip. |
+| Immediate toggle | **IMPLEMENTED; runtime UI automation blocked** — the command applies the AppKit call before saving and the UI re-reads native state on persistence errors. This session could not synthesize the click because macOS denied assistive access. |
+
+### Standalone desktop runtime (2026-08-17)
+
+The desktop interview assistant is now independent from the Verity web product.
+The login/signup screen and all calls to `/v1/auth`, `/v1/workspaces`, live
+session creation, ticket issuance, and the backend WebSocket were removed.
+Desktop startup now opens directly to local settings and audio-source selection.
+
+The native pipeline performs local RMS-based speech segmentation, flushes after
+a 360 ms pause, posts 16 kHz mono WAV directly to Groq
+`whisper-large-v3-turbo`, detects interview questions locally, then streams an
+answer from `openai/gpt-oss-20b` with low reasoning effort. The HUD displays
+measured STT, first-response, and total latency. The API key and role/company
+context are desktop-local preferences; the key can alternatively be injected
+with `VERITY_GROQ_API_KEY` or `GROQ_API_KEY`.
+
+Version 0.2 adds multiple locally persisted keys with ordered failover, an API
+connection test, and PDF/TXT/Markdown import for resume and job description.
+The prompt uses bounded document context and instructs the model not to invent
+resume facts. The macOS app now runs with Accessory activation policy and hides
+its Dock icon; Show, Hide, and Quit remain available from the menu-bar icon.
+This is not process hiding: Verity remains visible to macOS and Activity Monitor.
+
+`cargo test` passes **13 tests**, `node --check ui/main.js` passes, and
+the standalone app launched with five macOS audio-input indicators present.
+A real Groq latency result is **NOT VERIFIED** because this machine currently
+has no Groq key configured. A response within one second is an optimization
+target, not a guaranteed free-tier SLO; network latency, Groq queueing, speech
+duration, and the 360 ms end-of-speech decision are external/runtime factors.
+
+These macOS 12.7.6 results must not be generalized to newer macOS releases.
+Tauri/AppKit accepted the protection call without error, but this environment
+could not establish whether full-display capture, ScreenCaptureKit-based tools,
+or a particular conferencing client honors it. The application is **not**
+"undetectable" and is not process-hidden; this feature concerns HUD contents
+only. A release gate remains: grant Screen Recording permission to the test
+harness, join a live Zoom/Meet call with a second observer, and repeat every
+blocked/not-verified row on each supported macOS major version.
+
+Current verification commands completed: `cargo fmt --check`, `cargo test`
+(**13 passed**), and `node --check ui/main.js`. Package verification is recorded
+below once the universal release build completes.
 
 ---
 
