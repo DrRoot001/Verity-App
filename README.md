@@ -4,12 +4,20 @@ A standalone, always-on-top window that listens to a real interview and streams
 an answer you can adapt while you respond. It has no login, signup, Verity web
 account, workspace, database, or backend dependency.
 
-Audio is segmented locally after a short pause and transcribed directly with
-Groq Whisper — that part always uses Groq. Who writes the suggested answer is
-your choice: Groq, OpenAI, Anthropic (Claude), or Google Gemini, picked in
-Advanced settings. You supply one or more Groq API keys in the desktop app or
-through `VERITY_GROQ_API_KEY`/`GROQ_API_KEY`; a non-Groq answer provider needs
-its own key, entered in the same settings panel.
+Bring your own API key. Two jobs are done by AI providers, and you pick one
+for each on the setup screen:
+
+- **Answers** — Groq, OpenAI, Anthropic (Claude), Google Gemini or Amazon
+  Bedrock writes the suggested answer.
+- **Transcription** — Groq Whisper, OpenAI or Gemini turns the interviewer's
+  audio into text. Anthropic and Bedrock cannot take audio, so when one of
+  them writes the answers, another provider transcribes and only the
+  transcript is sent to them. On **Automatic** (the default) Verity picks
+  Groq if you have a Groq key (fastest), otherwise your answer provider if it
+  can transcribe, otherwise OpenAI or Gemini.
+
+One Groq, OpenAI or Gemini key is enough for both jobs. A Groq key can also
+come from `VERITY_GROQ_API_KEY`/`GROQ_API_KEY`.
 
 ---
 
@@ -201,9 +209,19 @@ real Windows and macOS machines:
    every push to `main`).
 2. When it finishes, open the run and download from **Artifacts**:
    - `verity-windows` — the `.exe` installer and `.msi`
-   - `verity-macos` — the `.dmg`
+   - `verity-macos` — the universal `.dmg` (Intel and Apple Silicon)
 
 Artifacts are zipped by GitHub, so unzip before running the installer.
+
+### Releasing a version
+
+1. Bump `version` in `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`.
+2. Write `release-notes/vX.Y.Z.md` — the release job refuses to publish
+   without it.
+3. Merge to `main`, then tag that commit `vX.Y.Z` and push the tag. CI builds,
+   checks the tag matches the app version, and publishes the release with
+   the installers attached. Every push to `main` also refreshes the rolling
+   `latest` pre-release.
 
 ### Building locally
 
@@ -237,10 +255,13 @@ Produces a versioned universal `.dmg` and `.app` under
 `--features native-system-audio` on macOS 13+ with Xcode 15+ to include the
 ScreenCaptureKit audio backend.
 
-**The build is unsigned.** Distributing a signed, notarized app needs a paid
-Apple Developer certificate, which this project does not have. macOS will
-refuse to open an unsigned app on first launch — the user opens it once with
-**right-click → Open**, and confirms. After that it launches normally.
+**The build is not notarized.** Distributing a signed, notarized app needs a
+paid Apple Developer certificate, which this project does not have yet. On
+first launch macOS refuses to open it: open **System Settings → Privacy &
+Security**, scroll to the message about Verity, and click **Open Anyway**
+(macOS 15 removed the older right-click → Open shortcut). After that it
+launches normally. If macOS instead says the app "is damaged", run
+`xattr -dr com.apple.quarantine /Applications/Verity.app` once.
 
 To sign later, set `APPLE_CERTIFICATE`, `APPLE_ID` and `APPLE_TEAM_ID` and add a
 `signingIdentity` to `tauri.conf.json`.
@@ -249,28 +270,45 @@ To sign later, set `APPLE_CERTIFICATE`, `APPLE_ID` and `APPLE_TEAM_ID` and add a
 
 ## Using it in an interview
 
-1. Paste one or more Groq API keys, one per line, and test the connection. They stay in this machine's local Verity preferences, rotate on auth/rate-limit/service failures, and always handle transcription regardless of which provider answers.
-2. Add the role/company and paste or import the resume and job description. PDF, TXT, and Markdown are supported.
-3. Choose the interview audio source. A loopback device is recommended.
-4. *(Optional)* In **Advanced settings**, pick an **Answer provider** other than Groq — OpenAI, Anthropic, Gemini, or Amazon Bedrock — paste that provider's own key(s), and test the connection. Leave it on Groq to reuse the keys from step 1.
+1. Under **Answers**, pick a provider and paste one or more of its API keys, one per line, then press **Test**. Keys stay in this machine's local Verity preferences and rotate automatically on auth, rate-limit and service failures.
+2. Under **Transcription**, leave **Automatic** unless you want a specific provider. If your answer provider can't hear audio (Anthropic, Bedrock), a second key box appears for the provider that will transcribe — **Test** it too.
+3. Add the role/company and paste or import the resume and job description. PDF, TXT, and Markdown are supported.
+4. Choose the interview audio source. A loopback device is recommended.
 5. Press **Start live assistant**, then position the HUD beside your call.
+
+**Test** makes a real request — a one-word answer with the chosen model, or a
+real transcription — so a retired model or a Bedrock model you haven't been
+granted access to is caught on this screen, not in the interview.
 
 The window stays above full-screen video calls. **Pinned** toggles that off if
 you need it to behave like a normal window.
 
 ### Choosing an answer provider
 
-There is no auto-detection of key type from its format — the **Answer
-provider** dropdown is the one place this is chosen, and the key field
-below it is only for whichever provider is currently selected.
+Keys are stored per provider, so switching providers never loses a key, and
+any answer provider pairs with any transcription provider.
 
-| Provider | Needs its own key | Default model |
+| Provider | Answers — default model, then fallbacks | Transcribes |
 |---|---|---|
-| Groq | No — reuses the keys above | `openai/gpt-oss-20b` |
-| OpenAI | Yes | `gpt-4o-mini` |
-| Anthropic (Claude) | Yes | `claude-haiku-4-5-20251001` |
-| Google Gemini | Yes | `gemini-2.0-flash` |
-| Amazon Bedrock | Yes — an [API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html), not an AWS access key/secret pair | `amazon.nova-lite-v1:0` |
+| Groq | `qwen/qwen3.8-27b` → `openai/gpt-oss-20b` → `openai/gpt-oss-120b` | Yes — `whisper-large-v3-turbo` (fastest) |
+| OpenAI | `gpt-4o-mini` → `gpt-6-luna` | Yes — `gpt-transcribe` → `gpt-4o-mini-transcribe` |
+| Anthropic (Claude) | `claude-haiku-4-5-20251001` → `claude-haiku-4-5` | No |
+| Google Gemini | `gemini-2.5-flash` → `gemini-3.8-flash` | Yes — `gemini-2.5-flash-lite` → `gemini-3.5-flash-lite` |
+| Amazon Bedrock ([API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html), not an access key/secret pair) | `amazon.nova-lite-v1:0` | No |
+
+Providers retire models on their own schedule — `gemini-2.0-flash`, this
+app's Gemini default until 0.3, was shut down on 2026-06-01. So with the
+**Answer model** field left empty, Verity uses the first default and falls
+through to the next if a provider reports the model gone, remembering the
+one that works for the rest of the session. Settings a model refuses
+(temperature on reasoning models, Gemini thinking levels, reasoning effort)
+are dropped or stepped down automatically on a 400 instead of failing the
+answer. Thinking and reasoning are kept to their minimum everywhere, because
+hidden reasoning delays the first word.
+
+The Groq default was chosen by measurement: with this app's exact prompt,
+`qwen/qwen3.8-27b` with reasoning off streamed its first word in ~140 ms
+against ~460 ms for `openai/gpt-oss-20b`, with no format violations in either.
 
 Every provider streams into the same HUD through the same events — switching
 providers changes nothing else about how Verity behaves — with one exception:
@@ -282,7 +320,9 @@ real successful response while building this, so Verity calls its regular
 is under a second — but it is a real, deliberate difference from the rest.
 
 The **Answer model** field is free text, so any model the selected provider
-hosts works, not only the default.
+hosts works, not only the default. For Bedrock, `region/model` (e.g.
+`eu-west-1/amazon.nova-lite-v1:0`) targets a key from a region other than
+`us-east-1`.
 
 #### Amazon Bedrock: model access is a separate AWS step
 
@@ -299,11 +339,14 @@ like.
 
 [bedrock-model-access]: https://docs.aws.amazon.com/bedrock/latest/userguide/model-access.html
 
-Requests per detected question: exactly one transcription call and one answer
-call, regardless of provider — plus one extra answer call per API key skipped
-on a retryable failure (rate limit, auth, 5xx). A silent, sub-threshold pause
+Requests per detected question: one transcription call per utterance and one
+answer call — plus one extra answer call per API key skipped on a retryable
+failure (rate limit, auth, 5xx), and one more if the interviewer adds to the
+question right after asking it (see below). A silent, sub-threshold pause
 never triggers a request at all; segmentation only fires once
 `SILENCE_FLUSH_MS` of quiet follows at least `MIN_VOICE_MS` of real speech.
+While a session runs, Verity pings each provider's free models endpoint every
+40 s so the connection is already open when the next question comes.
 
 ### Screen-capture protection
 
@@ -341,17 +384,32 @@ indicator going out is the signal that nothing is being captured.
 
 ## What it looks for
 
-Not every sentence is a question. A lightweight local detector recognizes
-question punctuation and common interview prompts such as “tell me,” “how,”
-“describe,” and “walk me through.” Small talk is transcribed but does not make
-an answer request. "What it heard" confirms the audio path is active.
+Not every sentence is a question. A local detector recognizes question
+punctuation and interview prompts such as “tell me,” “how,” “describe,” and
+“walk me through” — also after openers like “Okay, so…”, and when the ask
+follows a statement (“We use Kafka a lot. I'd love to hear how you've used
+it.”). Call logistics (“can you hear me?”) and small talk are transcribed but
+make no answer request. "What it heard" confirms the audio path is active.
 
-The HUD displays transcription, first-response, and total latency. The path is
-optimized for low latency with a 360 ms silence flush, 16 kHz mono WAV, a reused
-HTTP connection, `whisper-large-v3-turbo`, streamed output, and
-`openai/gpt-oss-20b` at low reasoning effort. Sub-one-second service is a target,
-not a guarantee: free-tier queueing, network time, and the required end-of-speech
-pause are outside the application’s control.
+**Pauses in the middle of a question.** Audio is cut after 360 ms of quiet so
+transcription starts immediately, but interviewers pause mid-sentence all the
+time. Verity handles that without slowing down ordinary questions:
+
+- A question that ends mid-sentence (“…a time when you”) is shown dimmed and
+  held for the rest of it — longer while the interviewer is audibly still
+  talking.
+- If the interviewer is already speaking again by the time a question is
+  transcribed, it waits for them to finish instead of answering half.
+- If they add to a question within 2 seconds of asking it, the two parts are
+  merged and the answer is rewritten for the whole question. Acknowledgements
+  (“mm-hmm”, “take your time”) never replace an answer you are reading.
+
+Measured end to end on the real Groq API with synthesized interviewer speech
+(`cargo test live_ -- --ignored`, see `session.rs`): the first word of the
+answer appears ~0.7 s after the interviewer stops talking, of which 360 ms is
+the end-of-speech pause and ~200 ms is transcription. Free-tier queueing and
+network time are outside the app's control, so treat that as typical, not
+guaranteed.
 
 ---
 
@@ -361,10 +419,15 @@ pause are outside the application’s control.
 src-tauri/
   src/main.rs        window, commands, wiring
   src/audio.rs       device enumeration, capture, resampling to 16 kHz mono
-  src/session.rs     local VAD, Groq Whisper, streamed Groq answers
+  src/session.rs     segmentation, transcription worker, question assembly, streamed answers
+  src/questions.rs   is it a question, is it finished, does the next speech continue it
+  src/providers.rs   the five providers: requests, streaming, keys, model fallbacks
   src/platform.rs    per-OS capability detection
 ui/                  the HUD itself (no build step — plain HTML/CSS/JS)
 ```
 
-Groq keys are never sent to the Verity web application. They are used only for
-requests to `https://api.groq.com/openai/v1`.
+API keys never leave this machine except in requests to their own provider:
+`api.groq.com`, `api.openai.com`, `api.anthropic.com`,
+`generativelanguage.googleapis.com`, and `bedrock-runtime.<region>.amazonaws.com`.
+Audio goes only to the transcription provider; only the transcript goes to the
+answer provider.

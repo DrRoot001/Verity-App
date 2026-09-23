@@ -603,3 +603,17 @@ button {
   font-weight: 700;
   color: var(--accent);
 }
+
+/* The interviewer paused mid-sentence and the rest is still coming: shown
+   so the candidate sees it was heard, but visibly not the final question. */
+#question.partial {
+  opacity: 0.65;
+  font-style: italic;
+}
+
+.hint code {
+  font-size: 0.95em;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+}

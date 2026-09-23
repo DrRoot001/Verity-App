@@ -11,8 +11,11 @@ mod debuglog;
 mod native_audio;
 mod platform;
 mod preferences;
+mod providers;
+mod questions;
 mod session;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -51,7 +54,7 @@ struct StartResult {
 
 #[derive(Serialize)]
 struct DesktopSettings {
-    groq_api_keys: Vec<String>,
+    provider_keys: BTreeMap<String, Vec<String>>,
     role_title: String,
     company_name: String,
     resume_text: String,
@@ -59,14 +62,26 @@ struct DesktopSettings {
     language: String,
     chat_model: String,
     chat_provider: String,
-    chat_api_keys: Vec<String>,
+    stt_provider: String,
     protect_hud_from_screen_capture: bool,
+    /// Per provider: default answer models (first is used unless the user
+    /// names one) and whether it can transcribe — so the UI never carries
+    /// its own copy of either list to drift out of sync with this build.
+    providers: Vec<ProviderInfo>,
+}
+
+#[derive(Serialize)]
+struct ProviderInfo {
+    id: &'static str,
+    label: &'static str,
+    can_transcribe: bool,
+    default_chat_models: &'static [&'static str],
 }
 
 impl From<&preferences::Preferences> for DesktopSettings {
     fn from(value: &preferences::Preferences) -> Self {
         Self {
-            groq_api_keys: value.groq_api_keys.clone(),
+            provider_keys: value.provider_keys.clone(),
             role_title: value.role_title.clone(),
             company_name: value.company_name.clone(),
             resume_text: value.resume_text.clone(),
@@ -74,9 +89,39 @@ impl From<&preferences::Preferences> for DesktopSettings {
             language: value.language.clone(),
             chat_model: value.chat_model.clone(),
             chat_provider: value.chat_provider.clone(),
-            chat_api_keys: value.chat_api_keys.clone(),
+            stt_provider: value.stt_provider.clone(),
             protect_hud_from_screen_capture: value.protect_hud_from_screen_capture,
+            providers: providers::Provider::ALL
+                .iter()
+                .map(|p| ProviderInfo {
+                    id: p.as_str(),
+                    label: p.label(),
+                    can_transcribe: p.can_transcribe(),
+                    default_chat_models: p.default_chat_models(),
+                })
+                .collect(),
         }
+    }
+}
+
+/// The saved preferences as the pipeline's settings.
+fn session_settings(saved: &preferences::Preferences) -> session::Settings {
+    session::Settings {
+        keys: saved
+            .provider_keys
+            .iter()
+            .filter_map(|(id, keys)| {
+                providers::Provider::parse_strict(id).map(|provider| (provider, keys.clone()))
+            })
+            .collect(),
+        chat_provider: providers::Provider::parse(&saved.chat_provider),
+        chat_model: saved.chat_model.clone(),
+        stt_provider: providers::Provider::parse_strict(&saved.stt_provider),
+        role_title: saved.role_title.clone(),
+        company_name: saved.company_name.clone(),
+        resume_text: saved.resume_text.clone(),
+        job_description: saved.job_description.clone(),
+        language: saved.language.clone(),
     }
 }
 
@@ -128,7 +173,7 @@ async fn get_desktop_settings(state: State<'_, AppState>) -> Result<DesktopSetti
 #[tauri::command]
 async fn save_desktop_settings(
     state: State<'_, AppState>,
-    groq_api_keys: Vec<String>,
+    provider_keys: BTreeMap<String, Vec<String>>,
     role_title: String,
     company_name: String,
     resume_text: String,
@@ -136,7 +181,7 @@ async fn save_desktop_settings(
     language: String,
     chat_model: String,
     chat_provider: String,
-    chat_api_keys: Vec<String>,
+    stt_provider: String,
 ) -> Result<DesktopSettings, String> {
     let path = state
         .preferences_path
@@ -145,42 +190,59 @@ async fn save_desktop_settings(
         .clone()
         .ok_or("The preferences path is not available.")?;
     let mut saved = state.preferences.lock().unwrap().clone();
-    saved.groq_api_keys = normalize_api_keys(groq_api_keys);
-    saved.groq_api_key.clear();
+    // Only known providers, each list trimmed and deduplicated; a provider
+    // whose list is now empty is dropped rather than kept as an empty entry.
+    saved.provider_keys = provider_keys
+        .into_iter()
+        .filter_map(|(id, keys)| {
+            let provider = providers::Provider::parse_strict(&id)?;
+            let keys = normalize_api_keys(keys);
+            (!keys.is_empty()).then(|| (provider.as_str().to_string(), keys))
+        })
+        .collect();
     saved.role_title = role_title.trim().to_string();
     saved.company_name = company_name.trim().to_string();
     saved.resume_text = resume_text.trim().to_string();
     saved.job_description = job_description.trim().to_string();
     saved.language = language.trim().to_string();
     saved.chat_model = chat_model.trim().to_string();
-    saved.chat_provider = session::ChatProvider::parse(&chat_provider)
+    saved.chat_provider = providers::Provider::parse(&chat_provider)
         .as_str()
         .to_string();
-    saved.chat_api_keys = normalize_api_keys(chat_api_keys);
+    saved.stt_provider = match providers::Provider::parse_strict(&stt_provider) {
+        Some(provider) if provider.can_transcribe() => provider.as_str().to_string(),
+        _ => "auto".to_string(),
+    };
     preferences::save(&path, &saved).map_err(|error| error.to_string())?;
     *state.preferences.lock().unwrap() = saved.clone();
     Ok(DesktopSettings::from(&saved))
 }
 
-#[tauri::command]
-async fn test_groq_connection(
-    state: State<'_, AppState>,
-) -> Result<session::ApiTestResult, String> {
-    let keys = state.preferences.lock().unwrap().groq_api_keys.clone();
-    session::test_api_keys(&keys)
-        .await
-        .map_err(|error| error.to_string())
-}
-
 /// Tests whatever is currently typed in the setup screen, not what was last
-/// saved — mirrors `test_groq_connection`'s own behavior, and lets a key get
-/// verified before the user commits to starting a live session with it.
+/// saved, so a key is proven before an interview depends on it. `kind` is
+/// "answers" (a real one-word generation with `model`) or "transcription".
 #[tauri::command]
-async fn test_chat_provider(
+async fn test_provider(
     provider: String,
     api_keys: Vec<String>,
+    model: String,
+    kind: String,
 ) -> Result<session::ApiTestResult, String> {
-    session::test_provider_keys(session::ChatProvider::parse(&provider), &api_keys)
+    let provider = providers::Provider::parse_strict(&provider)
+        .ok_or_else(|| format!("Unknown provider: {provider}"))?;
+    let keys = normalize_api_keys(api_keys);
+    if keys.is_empty() {
+        return Err(format!(
+            "Add at least one {} API key first.",
+            provider.label()
+        ));
+    }
+    let kind = if kind == "transcription" {
+        session::TestKind::Transcription
+    } else {
+        session::TestKind::Answers
+    };
+    session::test_provider(provider, keys, &model, kind)
         .await
         .map_err(|error| error.to_string())
 }
@@ -235,8 +297,9 @@ async fn extract_document_text(file_name: String, contents: String) -> Result<St
     Ok(text)
 }
 
-/// Begin a local desktop session. Audio goes directly to Groq; no web account,
-/// workspace, database record, or backend socket is involved.
+/// Begin a local desktop session. Audio goes only to the chosen transcription
+/// provider and the transcript only to the chosen answer provider; no web
+/// account, workspace, database record, or backend socket is involved.
 #[tauri::command]
 async fn start_listening(
     app: tauri::AppHandle,
@@ -251,20 +314,10 @@ async fn start_listening(
         return Err("A listening session is already active.".to_string());
     }
     let saved = state.preferences.lock().unwrap().clone();
-    if saved.groq_api_keys.is_empty() {
-        return Err("Add at least one Groq API key before starting.".to_string());
-    }
-    let settings = session::Settings {
-        api_keys: saved.groq_api_keys,
-        role_title: saved.role_title,
-        company_name: saved.company_name,
-        resume_text: saved.resume_text,
-        job_description: saved.job_description,
-        language: saved.language,
-        chat_model: saved.chat_model,
-        chat_provider: session::ChatProvider::parse(&saved.chat_provider),
-        chat_api_keys: saved.chat_api_keys,
-    };
+    let settings = session_settings(&saved);
+    // Refuse before the audio device opens: a missing key belongs on the
+    // setup screen, not in the middle of an interview.
+    settings.engines().map_err(|error| error.to_string())?;
 
     let (raw_tx, raw_rx) = std::sync::mpsc::channel::<audio::CaptureMessage>();
     let capture = if device == audio::NATIVE_SYSTEM_AUDIO_DEVICE_ID {
@@ -351,7 +404,7 @@ async fn start_listening(
     let session_log_path = log_path.clone();
     tokio::spawn(async move {
         if let Err(err) = session::run_session(
-            handle.clone(),
+            session::tauri_sink(handle.clone()),
             settings,
             audio_rx,
             stop_rx,
@@ -531,17 +584,11 @@ fn main() {
             let debug_log_path = debuglog::path(&config_dir);
             debuglog::log(&debug_log_path, "--- app launched ---");
             let mut saved = preferences::load(&preferences_path);
-            if saved.groq_api_keys.is_empty() && !saved.groq_api_key.is_empty() {
-                saved.groq_api_keys.push(saved.groq_api_key.clone());
-                saved.groq_api_key.clear();
-            }
-            if saved.groq_api_keys.is_empty() {
+            if saved.keys("groq").is_empty() {
                 let environment_key = std::env::var("VERITY_GROQ_API_KEY")
                     .or_else(|_| std::env::var("GROQ_API_KEY"))
                     .unwrap_or_default();
-                if !environment_key.trim().is_empty() {
-                    saved.groq_api_keys.push(environment_key.trim().to_string());
-                }
+                saved.add_keys("groq", [environment_key]);
             }
             if !saved.permissions_primed {
                 prime_permissions(app.handle().clone(), preferences_path.clone());
@@ -572,8 +619,7 @@ fn main() {
             get_platform_capabilities,
             get_desktop_settings,
             save_desktop_settings,
-            test_groq_connection,
-            test_chat_provider,
+            test_provider,
             extract_document_text,
             start_listening,
             stop_listening,
