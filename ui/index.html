@@ -18,11 +18,30 @@
         <p class="hint">macOS will ask once for microphone access (and, on macOS 13+, screen-recording access — used only to hear call audio, never to record your screen). You can grant both now so nothing interrupts your interview later.</p>
       </div>
 
-      <label for="groq-keys">Groq API keys</label>
-      <textarea id="groq-keys" rows="3" spellcheck="false" placeholder="One gsk_… key per line"></textarea>
+      <label for="chat-provider">Answers</label>
+      <select id="chat-provider"></select>
+      <label for="answer-keys" id="answer-keys-label">API keys</label>
+      <textarea id="answer-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
       <div class="inline-row">
-        <p id="key-hint" class="hint">Stored only in this Mac's local Verity preferences.</p>
-        <button id="test-api-btn" class="small-button" type="button">Test connection</button>
+        <p id="answer-key-hint" class="hint">Stored only on this computer. Extra keys take over automatically if one hits a limit.</p>
+        <button id="test-answer-btn" class="small-button" type="button">Test</button>
+      </div>
+
+      <label for="stt-provider">Transcription</label>
+      <select id="stt-provider">
+        <option value="auto">Automatic (recommended)</option>
+        <option value="groq">Groq Whisper</option>
+        <option value="openai">OpenAI</option>
+        <option value="gemini">Google Gemini</option>
+      </select>
+      <p id="stt-hint" class="hint"></p>
+      <div id="stt-keys-row" class="hidden">
+        <label for="stt-keys" id="stt-keys-label">Transcription API keys</label>
+        <textarea id="stt-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
+        <div class="inline-row">
+          <p id="stt-key-hint" class="hint">Only audio goes here; only the transcript goes to the answer provider.</p>
+          <button id="test-stt-btn" class="small-button" type="button">Test</button>
+        </div>
       </div>
 
       <div class="field-grid">
@@ -75,27 +94,9 @@
             <option value="hi">Hindi</option>
           </select>
 
-          <label for="chat-provider">Answer provider</label>
-          <select id="chat-provider">
-            <option value="groq">Groq</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="bedrock">Amazon Bedrock</option>
-          </select>
-          <p class="hint">Transcription always uses the Groq keys above — Whisper is a Groq-only step. This choice only picks who writes the suggested answer.</p>
-
-          <div id="chat-keys-row" class="hidden">
-            <label for="chat-api-keys">Answer provider API keys</label>
-            <textarea id="chat-api-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
-            <div class="inline-row">
-              <p id="chat-key-hint" class="hint">Stored only in this machine's local Verity preferences.</p>
-              <button id="test-chat-btn" class="small-button" type="button">Test connection</button>
-            </div>
-          </div>
-
           <label for="chat-model">Answer model</label>
-          <input id="chat-model" placeholder="Model name for the selected provider" />
+          <input id="chat-model" spellcheck="false" />
+          <p id="chat-model-hint" class="hint">Leave empty for the fastest default; if that model is ever retired, the next one takes over automatically. Amazon Bedrock accepts <code>region/model</code> for keys outside us-east-1.</p>
         </div>
       </details>
 
