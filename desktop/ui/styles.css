@@ -604,29 +604,16 @@ button {
   color: var(--accent);
 }
 
-
-/* The words the candidate actually says. Sized to be read out loud at a
-   glance mid-sentence, which is the whole job of this pane. */
-.answer {
-  margin: 0 0 10px;
-  font-size: 18px;
-  line-height: 1.55;
-  color: var(--text, #f2f4f8);
-  white-space: pre-wrap;
+/* The interviewer paused mid-sentence and the rest is still coming: shown
+   so the candidate sees it was heard, but visibly not the final question. */
+#question.partial {
+  opacity: 0.65;
+  font-style: italic;
 }
 
-.answer:empty {
-  display: none;
-}
-
-/* Names and figures no approved evidence backs. Shown rather than silently
-   trusted — reading an invented metric out loud is the worst failure here. */
-.unverified {
-  margin: 0 0 10px;
-  font-size: 12px;
-  color: #f0b429;
-}
-
-.unverified:empty {
-  display: none;
+.hint code {
+  font-size: 0.95em;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
 }
