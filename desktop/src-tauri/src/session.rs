@@ -1331,6 +1331,7 @@ mod tests {
         panic!("no data chunk in the synthesized speech");
     }
 
+    #[cfg(target_os = "macos")]
     fn silence(ms: u64) -> Vec<u8> {
         vec![0; (TARGET_RATE as u64 * 2 * ms / 1000) as usize]
     }
