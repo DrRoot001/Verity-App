@@ -3,9 +3,15 @@ name: Build
 # Builds installers on real Windows and macOS machines. Run it from the
 # Actions tab (or on any push) and download the result from the run's
 # Artifacts section - no local toolchain required.
+#
+# Releases:
+# - every push to main republishes the rolling "latest" pre-release;
+# - pushing a tag vX.Y.Z (matching the app version) publishes that version
+#   as a normal release, which GitHub then marks as the Latest release.
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -63,10 +69,13 @@ jobs:
               src-tauri/target/release/bundle/nsis/*.exe
               src-tauri/target/release/bundle/msi/*.msi
               dist-probe/*
+          # Universal: one .dmg that runs natively on Intel and Apple
+          # Silicon. The arm64-only build this replaced could not be opened
+          # on any Intel Mac at all.
           - os: macos-latest
             artifact: verity-macos
             paths: |
-              src-tauri/target/release/bundle/dmg/*.dmg
+              src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
               dist-probe/*
     steps:
       - uses: actions/checkout@v4
@@ -84,26 +93,46 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --locked --version "^2"
 
+      - name: Add both Mac architectures
+        if: runner.os == 'macOS'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - name: Build installer
         working-directory: src-tauri
-        run: cargo tauri build
-
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            cargo tauri build --target universal-apple-darwin
+          else
+            cargo tauri build
+          fi
 
       - name: Build audio probe
-        run: cargo build --release --manifest-path audio-probe/Cargo.toml
-
-      - name: Stage probe next to the installers
         shell: bash
         run: |
           mkdir -p dist-probe
-          # Only the executable: the sibling .d and .pdb files are build debris.
-          cp audio-probe/target/release/audio-probe.exe dist-probe/ 2>/dev/null \
-            || cp audio-probe/target/release/audio-probe dist-probe/
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            for arch in aarch64 x86_64; do
+              cargo build --release --manifest-path audio-probe/Cargo.toml --target "$arch-apple-darwin"
+            done
+            lipo -create -output dist-probe/audio-probe \
+              audio-probe/target/aarch64-apple-darwin/release/audio-probe \
+              audio-probe/target/x86_64-apple-darwin/release/audio-probe
+            lipo -info dist-probe/audio-probe
+          else
+            cargo build --release --manifest-path audio-probe/Cargo.toml
+            # Only the executable: the sibling .d and .pdb files are build debris.
+            cp audio-probe/target/release/audio-probe.exe dist-probe/
+          fi
           ls -l dist-probe
+
+      - name: Check the Mac app runs on both architectures
+        if: runner.os == 'macOS'
+        run: lipo -info src-tauri/target/universal-apple-darwin/release/bundle/macos/Verity.app/Contents/MacOS/verity-desktop
 
       - name: List what was bundled
         shell: bash
-        run: ls -R src-tauri/target/release/bundle
+        run: ls -R src-tauri/target/*/release/bundle src-tauri/target/release/bundle 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -111,16 +140,18 @@ jobs:
           path: ${{ matrix.paths }}
           if-no-files-found: error
 
-  # Republishes the "latest" GitHub Release with every successful build on
-  # main, so there is always one permanent, discoverable link to download
-  # from - Actions artifacts expire (90 days) and need a GitHub login to
-  # even find; a Release does neither. Only runs after both installer jobs
-  # in the matrix above succeed, and only for real pushes to main (not
-  # PRs) or a manual run explicitly targeting main.
+  # Main: republishes the rolling "latest" pre-release, so there is always a
+  # permanent link to the newest build (Actions artifacts expire after 90
+  # days and need a GitHub login to find).
+  # Tag vX.Y.Z: publishes that version as a normal release. GitHub marks the
+  # newest normal release as Latest, so /releases/latest always lands on a
+  # real version rather than on an untested main build.
   release:
-    name: Publish latest release
+    name: Publish release
     needs: [build]
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -130,36 +161,62 @@ jobs:
         with:
           path: artifacts
 
+      - name: A version tag must match the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          app_version=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "v$app_version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the app version $app_version in src-tauri/tauri.conf.json"
+            exit 1
+          fi
+
       - name: Flatten and clearly name the release assets
         shell: bash
         run: |
           mkdir -p release
           cp artifacts/verity-windows/src-tauri/target/release/bundle/nsis/*.exe release/
           cp artifacts/verity-windows/src-tauri/target/release/bundle/msi/*.msi release/
-          cp artifacts/verity-macos/src-tauri/target/release/bundle/dmg/*.dmg release/
+          cp artifacts/verity-macos/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg release/
           cp artifacts/verity-windows/dist-probe/audio-probe.exe release/audio-probe-windows.exe
           cp artifacts/verity-macos/dist-probe/audio-probe release/audio-probe-macos
           ls -la release
 
-      - name: Republish the "latest" release
+      - name: Publish version release
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete-then-recreate, not upload --clobber: a version bump can
-          # change an asset's filename (Verity_0.2.0_... -> 0.3.0_...), and
-          # --clobber only overwrites files with matching names, which would
-          # leave old, stale, differently-named installers attached forever.
-          # --cleanup-tag also removes the old "latest" tag so the new one
-          # created below points at this commit, not a stale one.
+          notes="release-notes/$GITHUB_REF_NAME.md"
+          if [ ! -f "$notes" ]; then
+            echo "::error::Missing $notes — every version release ships with notes."
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Verity Desktop $GITHUB_REF_NAME" \
+            --notes-file "$notes" \
+            --verify-tag \
+            --latest
+
+      - name: Republish the rolling "latest" pre-release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete-then-recreate, not upload --clobber: a version bump
+          # changes asset filenames, and --clobber would leave the old,
+          # differently-named installers attached forever. --cleanup-tag
+          # moves the "latest" tag to this commit.
           gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
           gh release create latest release/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Verity Desktop — latest build" \
+            --title "Verity Desktop — latest build from main" \
             --target main \
-            --notes "Built automatically from commit $(git rev-parse --short HEAD) on \`main\`. Replaced on every new build that lands here — see the [commit history](https://github.com/$GITHUB_REPOSITORY/commits/main) for what changed since your last download.
+            --prerelease \
+            --notes "Built automatically from commit $(git rev-parse --short HEAD) on \`main\` and replaced on every new build there. For the tested version, use the newest release marked **Latest** on the [releases page](https://github.com/$GITHUB_REPOSITORY/releases/latest).
 
-          **Windows**: run \`Verity_*_x64-setup.exe\` (or the \`.msi\`). SmartScreen will warn it's unsigned — More info → Run anyway.
+          **Windows**: run \`Verity_*_x64-setup.exe\` (or the \`.msi\`). SmartScreen warns because the installer is not code-signed — More info → Run anyway.
 
-          **macOS (Apple Silicon)**: open \`Verity_*_aarch64.dmg\`, drag Verity to Applications. Unsigned — right-click the app → Open the first time.
+          **macOS (Intel and Apple Silicon)**: open \`Verity_*_universal.dmg\` and drag Verity to Applications. It is not notarized, so the first launch needs System Settings → Privacy & Security → Open Anyway.
 
           \`audio-probe-windows.exe\` / \`audio-probe-macos\`: a standalone audio-capture diagnostic, no API key or network needed — see the README's \"When nothing is being transcribed\" section."
