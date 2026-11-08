@@ -291,9 +291,9 @@ any answer provider pairs with any transcription provider.
 | Provider | Answers — default model, then fallbacks | Transcribes |
 |---|---|---|
 | Groq | `qwen/qwen3.8-27b` → `openai/gpt-oss-20b` → `openai/gpt-oss-120b` | Yes — `whisper-large-v3-turbo` (fastest) |
-| OpenAI | `gpt-4o-mini` → `gpt-6-luna` | Yes — `gpt-transcribe` → `gpt-4o-mini-transcribe` |
-| Anthropic (Claude) | `claude-haiku-4-5-20251001` → `claude-haiku-4-5` | No |
-| Google Gemini | `gemini-2.5-flash` → `gemini-3.8-flash` | Yes — `gemini-2.5-flash-lite` → `gemini-3.5-flash-lite` |
+| OpenAI | `gpt-6-luna` → `gpt-4o-mini` | Yes — `gpt-transcribe` → `gpt-4o-mini-transcribe` |
+| Anthropic (Claude) | `claude-haiku-5-5` → `claude-haiku-4-5` | No |
+| Google Gemini | `gemini-3.6-flash` → `gemini-3.8-flash` | Yes — `gemini-2.5-flash-lite` → `gemini-3.5-flash-lite` |
 | Amazon Bedrock ([API key](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html), not an access key/secret pair) | `amazon.nova-lite-v1:0` | No |
 
 Providers retire models on their own schedule — `gemini-2.0-flash`, this

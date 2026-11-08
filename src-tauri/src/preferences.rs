@@ -20,7 +20,11 @@ pub const FILE_NAME: &str = "desktop-preferences.json";
 /// Models that were once this app's defaults and have since been shut down
 /// by their provider. A saved copy of one would fail every answer, so it is
 /// cleared back to "use the current default" on load.
-const RETIRED_MODELS: &[&str] = &["gemini-2.0-flash", "gemini-2.0-flash-001"];
+const RETIRED_MODELS: &[&str] = &[
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.5-flash",
+];
 
 /// The shape `migrate` produces. Files without the field are version 0.
 const CURRENT_VERSION: u32 = 3;

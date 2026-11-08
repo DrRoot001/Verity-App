@@ -126,10 +126,14 @@ impl Provider {
                 "openai/gpt-oss-20b",
                 "openai/gpt-oss-120b",
             ],
-            Self::OpenAi => &["gpt-4o-mini", "gpt-6-luna"],
-            Self::Anthropic => &["claude-haiku-4-5-20251001", "claude-haiku-4-5"],
-            // gemini-2.0-flash, the previous default, was shut down 2026-06-01.
-            Self::Gemini => &["gemini-2.5-flash", "gemini-3.8-flash"],
+            // gpt-4o-mini shuts down 2027-01-14; gpt-6-luna is OpenAI's named
+            // replacement.
+            Self::OpenAi => &["gpt-6-luna", "gpt-4o-mini"],
+            // Haiku 5.5: current Haiku, ~10x cheaper than 4.5 ($0.10/$0.50).
+            Self::Anthropic => &["claude-haiku-5-5", "claude-haiku-4-5"],
+            // gemini-2.5-flash shuts down 2026-12-01 (2.0-flash: 2026-06-01).
+            // 3.6 Flash has no shutdown date and costs less than 3.8.
+            Self::Gemini => &["gemini-3.6-flash", "gemini-3.8-flash"],
             // Needs per-model access enabled once in the AWS console.
             Self::Bedrock => &["amazon.nova-lite-v1:0"],
         }
@@ -294,7 +298,16 @@ impl Tuning {
                     tuning.max_tokens = MAX_ANSWER_TOKENS + THINKING_HEADROOM_TOKENS;
                 }
             }
-            Provider::Anthropic | Provider::Bedrock => {}
+            Provider::Anthropic => {
+                if model_lower.starts_with("claude-haiku-5") {
+                    // Haiku 5.5 thinks by default (slow first word, and it
+                    // eats the answer's token cap) and 400s on a
+                    // non-default temperature.
+                    tuning.temperature = None;
+                    tuning.thinking = Some(json!({ "type": "disabled" }));
+                }
+            }
+            Provider::Bedrock => {}
         }
         tuning
     }
@@ -407,6 +420,9 @@ pub fn build_chat_request(
             });
             if let Some(temperature) = tuning.temperature {
                 body["temperature"] = json!(temperature);
+            }
+            if let Some(thinking) = &tuning.thinking {
+                body["thinking"] = thinking.clone();
             }
             client
                 .post("https://api.anthropic.com/v1/messages")
@@ -974,6 +990,29 @@ mod tests {
             assert_eq!(tuning.reasoning_effort[0], "none", "{model}");
             assert!(tuning.max_tokens > MAX_ANSWER_TOKENS, "{model}");
         }
+    }
+
+    #[test]
+    fn haiku_5_turns_thinking_off_and_sends_no_temperature() {
+        let tuning = Tuning::initial(Provider::Anthropic, "claude-haiku-5-5");
+        assert_eq!(tuning.temperature, None);
+        let request = build_chat_request(
+            &reqwest::Client::new(),
+            Provider::Anthropic,
+            "k",
+            "claude-haiku-5-5",
+            "hi",
+            &tuning,
+        )
+        .build()
+        .unwrap();
+        let body: Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(body["thinking"], json!({ "type": "disabled" }));
+        assert!(body.get("temperature").is_none());
+        // Haiku 4.5 keeps its old shape.
+        let old = Tuning::initial(Provider::Anthropic, "claude-haiku-4-5");
+        assert_eq!((old.temperature, old.thinking), (Some(0.3), None));
     }
 
     #[test]
