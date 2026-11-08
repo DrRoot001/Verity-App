@@ -1,160 +1,172 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Verity Interview Assistant</title>
+    <title>Verity</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3z" /></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3v2H6v-2l4-3-1-6zM12 15v6" /></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" /></symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M5 20h14" /></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></symbol>
+    </svg>
+
     <section id="setup" class="pane">
-      <header class="brand-row">
-        <div class="brand"><span class="mark">V</span><span>Verity</span></div>
-        <span class="local-badge">Standalone</span>
+      <header class="topbar">
+        <div class="brand"><span class="mark">V</span>Verity</div>
       </header>
-      <div class="hero-copy">
-        <h1>Live Interview Assistant</h1>
-        <p>No account or web dashboard. Choose an audio source and start listening.</p>
-        <p class="hint">macOS will ask once for microphone access (and, on macOS 13+, screen-recording access — used only to hear call audio, never to record your screen). You can grant both now so nothing interrupts your interview later.</p>
-      </div>
 
-      <label for="chat-provider">Answers</label>
-      <select id="chat-provider"></select>
-      <label for="answer-keys" id="answer-keys-label">API keys</label>
-      <textarea id="answer-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
-      <div class="inline-row">
-        <p id="answer-key-hint" class="hint">Stored only on this computer. Extra keys take over automatically if one hits a limit.</p>
-        <button id="test-answer-btn" class="small-button" type="button">Test</button>
-      </div>
-
-      <label for="stt-provider">Transcription</label>
-      <select id="stt-provider">
-        <option value="auto">Automatic (recommended)</option>
-        <option value="groq">Groq Whisper</option>
-        <option value="openai">OpenAI</option>
-        <option value="gemini">Google Gemini</option>
-      </select>
-      <p id="stt-hint" class="hint"></p>
-      <div id="stt-keys-row" class="hidden">
-        <label for="stt-keys" id="stt-keys-label">Transcription API keys</label>
-        <textarea id="stt-keys" rows="2" spellcheck="false" placeholder="One API key per line"></textarea>
-        <div class="inline-row">
-          <p id="stt-key-hint" class="hint">Only audio goes here; only the transcript goes to the answer provider.</p>
-          <button id="test-stt-btn" class="small-button" type="button">Test</button>
-        </div>
-      </div>
-
-      <div class="field-grid">
-        <div>
-          <label for="role-title">Role</label>
-          <input id="role-title" placeholder="e.g. Backend Engineer" />
-        </div>
-        <div>
-          <label for="company-name">Company</label>
-          <input id="company-name" placeholder="Optional" />
-        </div>
-      </div>
-
-      <details class="context-panel" open>
-        <summary>Interview context</summary>
-        <div class="details-body">
-          <label for="resume-text">Resume</label>
-          <textarea id="resume-text" rows="5" placeholder="Paste resume text or import a document"></textarea>
-          <div class="document-row">
-            <input id="resume-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
-            <button class="small-button import-button" type="button" data-file="resume-file" data-target="resume-text">Import resume</button>
-            <span id="resume-count" class="hint">0 characters</span>
+      <div class="scroll">
+        <section class="group">
+          <h2>AI provider</h2>
+          <div class="field">
+            <label for="chat-provider">Provider</label>
+            <select id="chat-provider"></select>
           </div>
-
-          <label for="job-description">Job description</label>
-          <textarea id="job-description" rows="5" placeholder="Paste the role requirements or import a document"></textarea>
-          <div class="document-row">
-            <input id="job-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
-            <button class="small-button import-button" type="button" data-file="job-file" data-target="job-description">Import job description</button>
-            <span id="job-count" class="hint">0 characters</span>
+          <div class="field">
+            <div class="label-row">
+              <label for="answer-keys" id="answer-keys-label">API key</label>
+              <button id="test-answer-btn" class="ghost" type="button">Test</button>
+            </div>
+            <textarea id="answer-keys" rows="1" spellcheck="false" placeholder="Paste key — one per line for backups"></textarea>
+            <p id="answer-key-hint" class="hint"></p>
           </div>
-          <p class="hint">PDF, TXT, or Markdown, up to 10 MB. Context keeps answers relevant and prevents invented resume facts.</p>
-        </div>
-      </details>
+          <div id="stt-keys-row" class="field hidden">
+            <div class="label-row">
+              <label for="stt-keys" id="stt-keys-label">Transcription key</label>
+              <button id="test-stt-btn" class="ghost" type="button">Test</button>
+            </div>
+            <textarea id="stt-keys" rows="1" spellcheck="false" placeholder="Paste key"></textarea>
+            <p id="stt-key-hint" class="hint"></p>
+          </div>
+          <p id="stt-hint" class="hint"></p>
+        </section>
 
-      <label for="device">Interview audio</label>
-      <select id="device"></select>
-      <p id="device-hint" class="hint"></p>
+        <section class="group">
+          <h2>Interview</h2>
+          <div class="row">
+            <div class="field">
+              <label for="role-title">Role</label>
+              <input id="role-title" placeholder="Backend Engineer" />
+            </div>
+            <div class="field">
+              <label for="company-name">Company</label>
+              <input id="company-name" placeholder="Optional" />
+            </div>
+          </div>
+          <div class="field">
+            <div class="label-row">
+              <label for="resume-text">Resume <span id="resume-count" class="count"></span></label>
+              <input id="resume-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
+              <button class="ghost import-button" type="button" data-file="resume-file" data-target="resume-text">Import</button>
+            </div>
+            <textarea id="resume-text" rows="3" placeholder="Paste or import (PDF, TXT, MD)"></textarea>
+          </div>
+          <div class="field">
+            <div class="label-row">
+              <label for="job-description">Job description <span id="job-count" class="count"></span></label>
+              <input id="job-file" class="file-input" type="file" accept=".pdf,.txt,.md" />
+              <button class="ghost import-button" type="button" data-file="job-file" data-target="job-description">Import</button>
+            </div>
+            <textarea id="job-description" rows="3" placeholder="Paste or import (PDF, TXT, MD)"></textarea>
+          </div>
+        </section>
 
-      <details>
-        <summary>Advanced settings</summary>
-        <div class="details-body">
-          <label for="language">Interview language</label>
-          <select id="language">
-            <option value="en">English</option>
-            <option value="es">Spanish</option>
-            <option value="fr">French</option>
-            <option value="de">German</option>
-            <option value="pt">Portuguese</option>
-            <option value="hi">Hindi</option>
-          </select>
+        <section class="group">
+          <h2>Audio</h2>
+          <div class="field">
+            <label for="device">Listen to</label>
+            <select id="device"></select>
+            <p id="device-hint" class="hint"></p>
+          </div>
+          <label class="switch" for="protect-capture">
+            <span>Hide from screen share</span>
+            <input id="protect-capture" type="checkbox" checked />
+            <span class="track"><span class="thumb"></span></span>
+          </label>
+        </section>
 
-          <label for="chat-model">Answer model</label>
-          <input id="chat-model" spellcheck="false" />
-          <p id="chat-model-hint" class="hint">Leave empty for the fastest default; if that model is ever retired, the next one takes over automatically. Amazon Bedrock accepts <code>region/model</code> for keys outside us-east-1.</p>
-        </div>
-      </details>
+        <details class="group advanced">
+          <summary><svg class="icon chevron"><use href="#i-chevron" /></svg>Advanced</summary>
+          <div class="field">
+            <label for="stt-provider">Transcription</label>
+            <select id="stt-provider">
+              <option value="auto">Automatic</option>
+              <option value="groq">Groq Whisper</option>
+              <option value="openai">OpenAI</option>
+              <option value="gemini">Google Gemini</option>
+            </select>
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="language">Language</label>
+              <select id="language">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="pt">Portuguese</option>
+                <option value="hi">Hindi</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="chat-model">Model</label>
+              <input id="chat-model" spellcheck="false" />
+            </div>
+          </div>
+        </details>
+      </div>
 
-      <label class="setting-toggle" for="protect-capture">
-        <input id="protect-capture" class="protect-capture-toggle" type="checkbox" checked />
-        <span>
-          <strong>Protect HUD from screen capture</strong>
-          <small>Enabled by default where macOS supports it.</small>
-        </span>
-      </label>
-
-      <button id="start-btn" class="primary">Start live assistant</button>
-      <p id="setup-error" class="error" role="alert"></p>
+      <footer class="actions">
+        <p id="setup-error" class="error" role="alert"></p>
+        <button id="start-btn" class="primary">Start listening</button>
+      </footer>
     </section>
 
     <section id="hud" class="pane hidden">
-      <header class="hud-bar">
-        <span id="dot" class="dot live"></span>
-        <span id="status">Listening</span>
-        <span id="latency" class="latency">Waiting for a question</span>
-        <button id="protect-btn" class="icon-chip protected" aria-pressed="true" title="HUD capture protection">Shield</button>
-        <button id="pin-btn" class="icon-chip" aria-pressed="true" title="Keep on top">Pinned</button>
-        <button id="stop-btn" class="icon-chip danger">Stop</button>
+      <header class="topbar hud-bar">
+        <div class="state">
+          <span class="dot-wrap"><span id="pulse-ring" class="pulse-ring"></span><span id="dot" class="dot live"></span></span>
+          <span id="status">Listening</span>
+        </div>
+        <div class="level-meter" title="Input level"><div id="level-fill" class="level-fill"></div></div>
+        <div class="tools">
+          <button id="protect-btn" class="icon-btn" aria-pressed="true" aria-label="Hide from screen share" title="Hidden from screen share"><svg class="icon"><use href="#i-shield" /></svg></button>
+          <button id="pin-btn" class="icon-btn" aria-pressed="true" aria-label="Keep on top" title="Keep on top"><svg class="icon"><use href="#i-pin" /></svg></button>
+          <button id="stop-btn" class="icon-btn danger" aria-label="Stop" title="Stop"><svg class="icon"><use href="#i-stop" /></svg></button>
+        </div>
       </header>
 
-      <div class="question card">
-        <p class="label">Interviewer</p>
-        <p id="question">Listening for a question…</p>
-      </div>
-
-      <div class="guidance card answer-card">
-        <p class="label">Suggested answer</p>
-        <p id="direction" class="direction">Your answer will stream here as soon as a question is detected.</p>
-        <ul id="points"></ul>
-        <p id="structure" class="structure"></p>
-      </div>
-
-      <div class="level-row">
-        <span id="pulse-ring" class="pulse-ring"></span>
-        <div class="level-meter" title="Live input level">
-          <div id="level-fill" class="level-fill"></div>
+      <div class="scroll hud-body">
+        <div class="question">
+          <p class="eyebrow">Interviewer</p>
+          <p id="question">Waiting for a question…</p>
         </div>
-      </div>
-      <div class="transcript-row">
-        <p id="heard" class="heard">Listening for audio…</p>
+
+        <div class="answer">
+          <p id="direction" class="direction"></p>
+          <ul id="points"></ul>
+          <p id="structure" class="structure"></p>
+        </div>
+
+        <p id="hud-error" class="error" role="alert"></p>
+
+        <details class="history">
+          <summary><svg class="icon chevron"><use href="#i-chevron" /></svg>History <span id="thread-count" class="count"></span></summary>
+          <div id="thread-list" class="thread-list">
+            <p id="thread-empty" class="hint">Nothing yet.</p>
+          </div>
+        </details>
       </div>
 
-      <section class="thread card">
-        <div class="thread-header">
-          <p class="label">Conversation</p>
-          <span id="thread-count" class="thread-count"></span>
-        </div>
-        <div id="thread-list" class="thread-list">
-          <p id="thread-empty" class="thread-empty">Questions and answers will collect here as the interview goes, so you can scroll back through what was already asked.</p>
-        </div>
-      </section>
-
-      <p id="hud-error" class="error" role="alert"></p>
+      <footer class="hud-foot">
+        <p id="heard" class="heard"></p>
+        <p id="latency" class="latency"></p>
+      </footer>
     </section>
 
     <script type="module" src="main.js"></script>

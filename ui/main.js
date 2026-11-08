@@ -65,34 +65,34 @@ function refreshProviders() {
   commitKeyFields();
   const chat = $("chat-provider").value;
   boundAnswerProvider = bindTextarea("answer-keys", chat, boundAnswerProvider);
-  $("answer-keys-label").textContent = `${labelOf(chat)} API keys`;
+  $("answer-keys-label").textContent = `${labelOf(chat)} API key`;
   $("chat-model").placeholder = `Default: ${defaultModelOf(chat)}`;
 
   const stt = resolveStt();
   const separate = stt.provider !== chat;
   $("stt-keys-row").classList.toggle("hidden", !separate);
   boundSttProvider = separate ? bindTextarea("stt-keys", stt.provider, boundSttProvider) : null;
-  $("stt-keys-label").textContent = `${labelOf(stt.provider)} API keys (transcription)`;
+  $("stt-keys-label").textContent = `${labelOf(stt.provider)} key · transcription`;
 
   const chatName = labelOf(chat);
   const sttName = labelOf(stt.provider);
-  let hint;
-  if (stt.automatic && !stt.found) {
-    hint = canTranscribe(chat)
-      ? `Add a ${chatName} key above — it will transcribe too.`
-      : `${chatName} can write answers but can't hear audio. Add a Groq key below (fastest), or choose OpenAI or Gemini — only the transcript is sent to ${chatName}.`;
-  } else if (!separate) {
-    hint = `${sttName} transcribes too — one key does both.`;
-  } else {
-    hint = `${sttName} transcribes the audio; ${chatName} only receives the transcript.`;
-    if (stt.provider === "groq") hint += " Groq Whisper is the fastest option.";
+  // Silent when one key does both; only speak up when a second key matters.
+  let hint = "";
+  if (stt.automatic && !stt.found && !canTranscribe(chat)) {
+    hint = `${chatName} can't hear audio — add a ${sttName} key for transcription.`;
+  } else if (separate) {
+    hint = `${sttName} transcribes · ${chatName} answers`;
   }
   $("stt-hint").textContent = hint;
 }
 
 function updateContextCounts() {
-  $("resume-count").textContent = `${$("resume-text").value.length.toLocaleString()} characters`;
-  $("job-count").textContent = `${$("job-description").value.length.toLocaleString()} characters`;
+  const count = (id) => {
+    const n = $(id).value.length;
+    return n ? `${n.toLocaleString()} chars` : "";
+  };
+  $("resume-count").textContent = count("resume-text");
+  $("job-count").textContent = count("job-description");
 }
 
 // ── Conversation thread ─────────────────────────────────────────────
@@ -137,7 +137,7 @@ function resetThread() {
   threadTurns = 0;
   renderThreadCount();
   $("thread-list").innerHTML =
-    '<p id="thread-empty" class="thread-empty">Questions and answers will collect here as the interview goes, so you can scroll back through what was already asked.</p>';
+    '<p id="thread-empty" class="hint">Nothing yet.</p>';
 }
 
 function show(id) {
@@ -149,7 +149,7 @@ function renderCaptureProtection(enabled) {
   captureProtectionEnabled = enabled;
   $("protect-capture").checked = enabled;
   $("protect-btn").setAttribute("aria-pressed", String(enabled));
-  $("protect-btn").textContent = enabled ? "Shield" : "Unshielded";
+  $("protect-btn").title = enabled ? "Hidden from screen share" : "Visible in screen share";
 }
 
 async function setCaptureProtection(enabled, errorTarget) {
@@ -168,10 +168,10 @@ async function setCaptureProtection(enabled, errorTarget) {
 function updateDeviceHint() {
   const chosen = devices.find((device) => device.name === $("device").value);
   $("device-hint").textContent = chosen?.is_native_system_audio
-    ? "Recommended: hears call audio directly from macOS, no extra setup and works with headphones."
+    ? "Hears the call directly. Works with headphones."
     : chosen?.is_loopback
-    ? "Recommended: this captures the interviewer's call audio and works with headphones."
-    : "Microphone input selected. The interview must play through speakers for the interviewer to be heard.";
+    ? "Hears the call audio. Works with headphones."
+    : "Microphone — the call must play through speakers.";
 }
 
 async function initialize() {
@@ -204,9 +204,9 @@ async function initialize() {
     $("device").innerHTML = devices
       .map((device) => {
         const label = device.is_native_system_audio
-          ? "System Audio (Recommended)"
+          ? "System audio"
           : escapeHtml(device.name);
-        const suffix = device.is_loopback ? " — call audio" : device.is_default ? " — default" : "";
+        const suffix = device.is_native_system_audio ? "" : device.is_loopback ? " · call audio" : device.is_default ? " · default" : "";
         return `<option value="${escapeHtml(device.name)}">${label}${suffix}</option>`;
       })
       .join("");
@@ -305,6 +305,7 @@ async function runProviderTest(button, hintId, provider, textareaId, kind) {
   button.disabled = true;
   $("setup-error").textContent = "";
   const original = $(hintId).textContent;
+  $(hintId).classList.remove("ok");
   try {
     const apiKeys = keysIn(textareaId);
     if (!apiKeys.length) throw new Error(`Add at least one ${labelOf(provider)} API key first.`);
@@ -316,7 +317,8 @@ async function runProviderTest(button, hintId, provider, textareaId, kind) {
       model: kind === "answers" ? $("chat-model").value.trim() : "",
       kind,
     });
-    $(hintId).textContent = `✓ ${result.detail} in ${result.latency_ms} ms · key ${result.working_key} of ${result.total_keys}`;
+    $(hintId).textContent = `✓ Works · ${result.latency_ms} ms${result.total_keys > 1 ? ` · key ${result.working_key} of ${result.total_keys}` : ""}`;
+    $(hintId).classList.add("ok");
   } catch (error) {
     $(hintId).textContent = original;
     $("setup-error").textContent = String(error);
@@ -352,12 +354,14 @@ $("start-btn").addEventListener("click", async () => {
     await invoke("start_listening", { device: $("device").value });
     $("dot").classList.add("live");
     $("status").textContent = "Listening";
-    $("latency").textContent = "Waiting for a question";
-    $("question").textContent = "Listening for a question…";
+    $("latency").textContent = "";
+    $("question").textContent = "Waiting for a question…";
     $("question").classList.remove("partial");
-    $("direction").textContent = "Your answer will stream here as soon as a question is detected.";
+    $("direction").textContent = "";
     $("points").innerHTML = "";
-    $("heard").textContent = "Listening for audio…";
+    $("structure").textContent = "";
+    $("hud-error").textContent = "";
+    $("heard").textContent = "";
     $("level-fill").style.width = "0%";
     $("pulse-ring").classList.remove("voiced");
     show("hud");
@@ -380,7 +384,7 @@ $("pin-btn").addEventListener("click", async () => {
   const pinned = $("pin-btn").getAttribute("aria-pressed") !== "true";
   await invoke("set_always_on_top", { pinned });
   $("pin-btn").setAttribute("aria-pressed", String(pinned));
-  $("pin-btn").textContent = pinned ? "Pinned" : "Unpinned";
+  $("pin-btn").title = pinned ? "Keep on top" : "Not on top";
 });
 
 $("protect-btn").addEventListener("click", () => {
@@ -468,14 +472,14 @@ listenOrReport("verity://event", ({ payload }) => {
     case "audio.silence": {
       const seconds = Math.round((data.silence_ms ?? 0) / 1000);
       $("status").textContent = "No audio detected";
-      $("heard").textContent = `No sound detected for ${seconds}s — check your audio source and volume in Setup.`;
+      $("heard").textContent = `No sound for ${seconds}s — check the audio source.`;
       break;
     }
     case "question.partial":
       // The interviewer paused mid-sentence; the rest is on its way.
       $("question").textContent = String(data.content ?? "");
       $("question").classList.add("partial");
-      $("status").textContent = "Listening to the rest…";
+      $("status").textContent = "Hearing the rest…";
       break;
     case "question.finalized":
       if (data.replaces != null) {
@@ -492,10 +496,10 @@ listenOrReport("verity://event", ({ payload }) => {
       currentQuestion = String(data.content ?? "");
       $("question").textContent = currentQuestion;
       $("question").classList.remove("partial");
-      $("direction").textContent = "Generating your answer…";
+      $("direction").textContent = "…";
       $("points").innerHTML = "";
       $("structure").textContent = "";
-      $("status").textContent = "Question detected";
+      $("status").textContent = "Answering";
       break;
     case "answer.delta":
       if (data.generation !== currentGeneration) break;
