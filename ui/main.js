@@ -254,7 +254,7 @@ function readFileAsBase64(file) {
 async function importDocument(button) {
   const input = $(button.dataset.file);
   const file = input.files?.[0];
-  if (!file) throw new Error("Choose a PDF, TXT, or Markdown document first.");
+  if (!file) throw new Error("Choose a PDF, image, TXT, or Markdown document first.");
   const originalLabel = button.textContent;
   button.disabled = true;
   try {

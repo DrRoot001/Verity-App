@@ -1193,16 +1193,46 @@ pub fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
 }
 
 fn truncate_context(value: &str, max_chars: usize) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
+    let compact = compact_whitespace(value);
+    if compact.is_empty() {
         return "Not provided.".to_string();
     }
-    trimmed.chars().take(max_chars).collect()
+    compact.chars().take(max_chars).collect()
+}
+
+/// PDF extraction and OCR leave runs of spaces and blank lines that cost
+/// tokens and eat the context budget without carrying meaning.
+pub fn compact_whitespace(text: &str) -> String {
+    let mut out = String::new();
+    let mut blank = false;
+    for line in text.lines() {
+        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+        if line.is_empty() {
+            blank = true;
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str(if blank { "\n\n" } else { "\n" });
+        }
+        out.push_str(&line);
+        blank = false;
+    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whitespace_is_compacted_but_paragraphs_survive() {
+        let raw = "  Jordan   Rivera \n\n\n\tSenior\t Engineer\n   \nGo,  Rust ";
+        assert_eq!(
+            compact_whitespace(raw),
+            "Jordan Rivera\n\nSenior Engineer\n\nGo, Rust"
+        );
+        assert_eq!(truncate_context(" \n\t ", 50), "Not provided.");
+    }
 
     #[test]
     fn wav_header_describes_pcm_payload() {

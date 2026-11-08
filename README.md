@@ -272,7 +272,7 @@ To sign later, set `APPLE_CERTIFICATE`, `APPLE_ID` and `APPLE_TEAM_ID` and add a
 
 1. Under **Answers**, pick a provider and paste one or more of its API keys, one per line, then press **Test**. Keys stay in this machine's local Verity preferences and rotate automatically on auth, rate-limit and service failures.
 2. Under **Transcription**, leave **Automatic** unless you want a specific provider. If your answer provider can't hear audio (Anthropic, Bedrock), a second key box appears for the provider that will transcribe — **Test** it too.
-3. Add the role/company and paste or import the resume and job description. PDF, TXT, and Markdown are supported.
+3. Add the role/company and paste or import the resume and job description. PDF, images (PNG/JPG), TXT, and Markdown are supported; scanned PDFs and photos are read with the OS's built-in OCR, on-device.
 4. Choose the interview audio source. A loopback device is recommended.
 5. Press **Start live assistant**, then position the HUD beside your call.
 

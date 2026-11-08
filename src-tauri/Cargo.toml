@@ -1,6 +1,6 @@
 [package]
 name = "verity-desktop"
-version = "0.4.0"
+version = "0.4.1"
 description = "Verity live interview assistant"
 edition = "2021"
 rust-version = "1.77"
@@ -32,7 +32,18 @@ base64 = "0.22"
 # must not be part of the default build - enable it explicitly once your
 # toolchain supports it: `cargo build --features native-system-audio`.
 [target.'cfg(target_os = "macos")'.dependencies]
+# Resume OCR uses the OS's own engines (Vision here, Windows.Media.Ocr on
+# Windows): offline, free, no model download. Versions match what tauri
+# already pulls in, so nothing new is compiled twice.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSError", "NSString"] }
+objc2-core-foundation = { version = "0.3", features = ["CFData", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGDataProvider", "CGImage", "CGPDFDocument", "CGPDFPage"] }
+objc2-vision = { version = "0.3", features = ["VNRequest", "VNRequestHandler", "VNRecognizeTextRequest", "VNObservation", "objc2-core-graphics"] }
 screencapturekit = { version = "8", features = ["macos_13_0"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Data_Pdf", "Foundation", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

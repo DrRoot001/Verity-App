@@ -9,6 +9,7 @@ mod audio;
 mod debuglog;
 #[cfg(all(target_os = "macos", feature = "native-system-audio"))]
 mod native_audio;
+mod ocr;
 mod platform;
 mod preferences;
 mod providers;
@@ -270,29 +271,29 @@ async fn extract_document_text(file_name: String, contents: String) -> Result<St
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let byte_count = bytes.len();
-    let text = match extension.as_str() {
-        "pdf" => pdf_extract::extract_text_from_mem(&bytes).map_err(|error| {
-            format!("Could not read PDF text. Scanned-image PDFs need OCR, which this app does not do: {error}")
-        })?,
+    // OCR is CPU-bound for a second or two per page; keep it off the async
+    // runtime that is also streaming audio.
+    let text = tokio::task::spawn_blocking(move || match extension.as_str() {
+        "pdf" => {
+            let text = pdf_extract::extract_text_from_mem(&bytes).unwrap_or_default();
+            // No real text layer (a scan, or fonts pdf-extract cannot map):
+            // read the rendered pages instead.
+            if text.split_whitespace().count() < 20 {
+                ocr::pdf_text(&bytes)
+            } else {
+                Ok(text)
+            }
+        }
+        "png" | "jpg" | "jpeg" => ocr::image_text(&bytes),
         "txt" | "md" => String::from_utf8(bytes)
-            .map_err(|_| "The document is not valid UTF-8 text.".to_string())?,
-        _ => return Err("Use a PDF, TXT, or Markdown document.".to_string()),
-    };
-    let text = text.trim().to_string();
+            .map_err(|_| "The document is not valid UTF-8 text.".to_string()),
+        _ => Err("Use a PDF, image, TXT, or Markdown document.".to_string()),
+    })
+    .await
+    .map_err(|_| "The document could not be read.".to_string())??;
+    let text = session::compact_whitespace(&text);
     if text.is_empty() {
-        return Err("No readable text was found in the document. If this PDF is a scanned image rather than real text, paste the content in manually instead — this app has no OCR.".to_string());
-    }
-    // A real multi-page resume/JD compresses to far more than this from any
-    // text-based PDF; this little text from a file this size means
-    // extraction likely half-succeeded (a font pdf-extract could not map
-    // correctly) rather than that the document is genuinely this short.
-    if byte_count > 50_000 && text.len() < 40 {
-        return Err(format!(
-            "Only {} characters came out of a {} KB PDF — extraction likely failed silently rather than the document being this short. Paste the text in manually instead.",
-            text.len(),
-            byte_count / 1024
-        ));
+        return Err("No readable text was found in the document.".to_string());
     }
     Ok(text)
 }
@@ -742,6 +743,6 @@ mod tests {
         let error = extract_document_text("resume.docx".to_string(), to_base64(b"anything"))
             .await
             .unwrap_err();
-        assert!(error.contains("PDF, TXT, or Markdown"));
+        assert!(error.contains("PDF, image, TXT, or Markdown"));
     }
 }
