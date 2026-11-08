@@ -101,6 +101,9 @@ jobs:
         working-directory: src-tauri
         shell: bash
         run: |
+          # The target cache also restores the previous version's installers;
+          # without this they get published alongside the new ones.
+          rm -rf target/release/bundle target/universal-apple-darwin/release/bundle
           if [ "$RUNNER_OS" = "macOS" ]; then
             cargo tauri build --target universal-apple-darwin
           else
