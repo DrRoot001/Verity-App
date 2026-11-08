@@ -4,10 +4,10 @@ name: Build
 # Actions tab (or on any push) and download the result from the run's
 # Artifacts section - no local toolchain required.
 #
-# Releases:
-# - every push to main republishes the rolling "latest" pre-release;
-# - pushing a tag vX.Y.Z (matching the app version) publishes that version
-#   as a normal release, which GitHub then marks as the Latest release.
+# Releases (no manual step):
+# - every push to main publishes its Windows + macOS installers as the
+#   Latest release (vX.Y.Z, then vX.Y.Z-build.N for later builds);
+# - pushing a tag vX.Y.Z (matching the app version) also publishes it.
 on:
   push:
     branches: [main]
@@ -140,12 +140,8 @@ jobs:
           path: ${{ matrix.paths }}
           if-no-files-found: error
 
-  # Main: republishes the rolling "latest" pre-release, so there is always a
-  # permanent link to the newest build (Actions artifacts expire after 90
-  # days and need a GitHub login to find).
-  # Tag vX.Y.Z: publishes that version as a normal release. GitHub marks the
-  # newest normal release as Latest, so /releases/latest always lands on a
-  # real version rather than on an untested main build.
+  # Runs only after tests and both installers passed, so /releases/latest
+  # always holds a build that passed CI on Windows and macOS.
   release:
     name: Publish release
     needs: [build]
@@ -198,25 +194,27 @@ jobs:
             --verify-tag \
             --latest
 
-      - name: Republish the rolling "latest" pre-release
+      - name: Publish this build as the latest release
         if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete-then-recreate, not upload --clobber: a version bump
-          # changes asset filenames, and --clobber would leave the old,
-          # differently-named installers attached forever. --cleanup-tag
-          # moves the "latest" tag to this commit.
-          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
-          gh release create latest release/* \
+          # Every build of main ships: the first build of a version is
+          # vX.Y.Z, later builds of the same version vX.Y.Z-build.N.
+          version="v$(jq -r .version src-tauri/tauri.conf.json)"
+          tag="$version"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            tag="$version-build.$GITHUB_RUN_NUMBER"
+          fi
+          notes_args=(--generate-notes)
+          if [ -f "release-notes/$version.md" ]; then
+            notes_args=(--notes-file "release-notes/$version.md")
+          fi
+          gh release create "$tag" release/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Verity Desktop — latest build from main" \
-            --target main \
-            --prerelease \
-            --notes "Built automatically from commit $(git rev-parse --short HEAD) on \`main\` and replaced on every new build there. For the tested version, use the newest release marked **Latest** on the [releases page](https://github.com/$GITHUB_REPOSITORY/releases/latest).
-
-          **Windows**: run \`Verity_*_x64-setup.exe\` (or the \`.msi\`). SmartScreen warns because the installer is not code-signed — More info → Run anyway.
-
-          **macOS (Intel and Apple Silicon)**: open \`Verity_*_universal.dmg\` and drag Verity to Applications. It is not notarized, so the first launch needs System Settings → Privacy & Security → Open Anyway.
-
-          \`audio-probe-windows.exe\` / \`audio-probe-macos\`: a standalone audio-capture diagnostic, no API key or network needed — see the README's \"When nothing is being transcribed\" section."
+            --title "Verity $tag" \
+            --target "$GITHUB_SHA" \
+            --latest \
+            "${notes_args[@]}"
+          # The old rolling pre-release this replaced.
+          gh release delete latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
