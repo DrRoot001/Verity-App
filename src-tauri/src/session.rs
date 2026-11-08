@@ -71,7 +71,10 @@ const WARM_INTERVAL: Duration = Duration::from_secs(40);
 /// an antecedent. Measured against Groq's 6,000 TPM free tier: 3 turns plus
 /// the two 1,500-char context fields is ~800 tokens per request, room for
 /// ~7 requests/minute instead of 2.
-const MAX_HISTORY_TURNS: usize = 3;
+const MAX_HISTORY_TURNS: usize = 12;
+/// Newest-first budget for the conversation in the prompt (~1k tokens), so a
+/// long interview never slows the first word down.
+const HISTORY_MAX_CHARS: usize = 4_000;
 const CONTEXT_FIELD_MAX_CHARS: usize = 1_500;
 
 #[derive(Debug, Clone)]
@@ -556,7 +559,17 @@ impl From<&Settings> for AnswerContext {
     }
 }
 
-fn build_prompt(context: &AnswerContext, history: &[(String, String)], question: &str) -> String {
+/// One thing the interviewer said, and the answer shown for it, if any.
+#[derive(Clone)]
+struct Turn {
+    generation: Option<u64>,
+    said: String,
+    answer: Option<String>,
+    /// A question (as opposed to a remark that set up context).
+    asked: bool,
+}
+
+fn build_prompt(context: &AnswerContext, history: &[Turn], question: &str) -> String {
     let AnswerContext {
         setting,
         resume,
@@ -574,7 +587,9 @@ fn build_prompt(context: &AnswerContext, history: &[(String, String)], question:
          If personal facts are unknown, still answer directly with a safe adaptable response — never \
          invent employers, dates, or metrics, and never tell the candidate that facts are missing. \
          If the question refers back to something earlier (e.g. \"the hardest part\", \"that project\"), \
-         resolve it using the recent conversation below.\n\n\
+         resolve it using the recent conversation below. If the interviewer's last question there was \
+         never answered (they kept talking), this question continues it: answer both parts together \
+         as one answer.\n\n\
          Pick ONE of these two formats based on what the question is actually asking:\n\n\
          FORMAT A — PERSONAL / BEHAVIORAL (about the candidate's own experience, a past situation, \
          motivation, strengths, weaknesses): a first-person narrative, 2-4 sentences, confident and \
@@ -646,8 +661,8 @@ struct Assembler {
     chat: ChatEngine,
     context: Arc<AnswerContext>,
     pending: Option<Pending>,
-    /// (generation, question, answer)
-    history: Vec<(u64, String, String)>,
+    /// The interview so far, oldest first.
+    history: Vec<Turn>,
     task: Option<AbortOnDrop>,
     next_generation: u64,
     /// The latest utterance heard speaking (start on the audio timeline, and
@@ -750,8 +765,7 @@ impl Assembler {
                     // The earlier answer covered only part of the question.
                     pending.replaces = Some(previous);
                     self.task = None;
-                    self.history
-                        .retain(|(generation, _, _)| *generation != previous);
+                    self.history.retain(|t| t.generation != Some(previous));
                 }
                 self.decide();
                 return;
@@ -760,13 +774,21 @@ impl Assembler {
 
         if questions::looks_like_question(&transcript.text) {
             // A new question: whatever was still streaming for the last one
-            // is abandoned in favour of what is being asked now.
+            // is abandoned in favour of what is being asked now — but the
+            // abandoned question stays in the conversation, so "and what did
+            // you learn from it?" still knows what "it" is.
             self.task = None;
-            let text = match self.preamble.take() {
-                Some((context, end_ms)) if follows(end_ms, transcript.start_ms) => {
-                    questions::merge(&context, &transcript.text)
+            if let Some(old) = self.pending.take() {
+                let answered = old
+                    .generation
+                    .is_some_and(|g| self.history.iter().any(|t| t.generation == Some(g)));
+                if !answered {
+                    self.remember(None, old.text, None, true);
                 }
-                _ => transcript.text,
+            }
+            let text = match self.take_preamble(transcript.start_ms) {
+                Some(context) => questions::merge(&context, &transcript.text),
+                None => transcript.text,
             };
             self.pending = Some(Pending {
                 text,
@@ -781,15 +803,42 @@ impl Assembler {
             self.decide();
         } else {
             if !questions::is_backchannel(&transcript.text) {
-                let context = match self.preamble.take() {
-                    Some((earlier, end_ms)) if follows(end_ms, transcript.start_ms) => {
-                        questions::merge(&earlier, &transcript.text)
-                    }
-                    _ => transcript.text.clone(),
+                let context = match self.take_preamble(transcript.start_ms) {
+                    Some(earlier) => questions::merge(&earlier, &transcript.text),
+                    None => transcript.text.clone(),
                 };
                 self.preamble = Some((keep_tail(&context, PREAMBLE_MAX_CHARS), transcript.end_ms));
             }
             (self.sink)("speech.ignored", json!({ "content": transcript.text }));
+        }
+    }
+
+    /// The preamble, if speech starting at `start_ms` directly follows it.
+    /// One that does not is moved into the conversation instead of lost.
+    fn take_preamble(&mut self, start_ms: u64) -> Option<String> {
+        let (text, end_ms) = self.preamble.take()?;
+        if follows(end_ms, start_ms) {
+            return Some(text);
+        }
+        self.remember(None, text, None, false);
+        None
+    }
+
+    fn remember(
+        &mut self,
+        generation: Option<u64>,
+        said: String,
+        answer: Option<String>,
+        asked: bool,
+    ) {
+        self.history.push(Turn {
+            generation,
+            said,
+            answer,
+            asked,
+        });
+        if self.history.len() > MAX_HISTORY_TURNS {
+            self.history.remove(0);
         }
     }
 
@@ -853,11 +902,7 @@ impl Assembler {
             }),
         );
 
-        let history: Vec<(String, String)> = self
-            .history
-            .iter()
-            .map(|(_, q, a)| (q.clone(), a.clone()))
-            .collect();
+        let history = self.history.clone();
         let question = pending.text.clone();
         let timing = Timing {
             queued_at: pending.queued_at,
@@ -899,10 +944,7 @@ impl Assembler {
         }
         self.task = None;
         if let Some(answer) = done.answer {
-            self.history.push((done.generation, done.question, answer));
-            if self.history.len() > MAX_HISTORY_TURNS {
-                self.history.remove(0);
-            }
+            self.remember(Some(done.generation), done.question, Some(answer), true);
         }
     }
 }
@@ -1076,17 +1118,28 @@ fn bullet_content(line: &str) -> Option<&str> {
     }
 }
 
-fn format_conversation(history: &[(String, String)]) -> String {
-    if history.is_empty() {
-        return "None yet.".to_string();
-    }
+fn format_conversation(history: &[Turn]) -> String {
     // Bracketed structural labels, not "Interviewer:"/"You:" — verified live
     // that those made a model continue the dialogue pattern.
-    history
-        .iter()
-        .map(|(q, a)| format!("[Previously asked] {q}\n[Previous answer] {a}"))
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    let mut blocks: Vec<String> = Vec::new();
+    let mut used = 0;
+    for turn in history.iter().rev() {
+        let block = match (&turn.answer, turn.asked) {
+            (Some(a), _) => format!("[Previously asked] {}\n[Previous answer] {a}", turn.said),
+            (None, true) => format!("[Asked, not answered — they kept talking] {}", turn.said),
+            (None, false) => format!("[Interviewer remarked] {}", turn.said),
+        };
+        used += block.len();
+        if used > HISTORY_MAX_CHARS && !blocks.is_empty() {
+            break;
+        }
+        blocks.push(block);
+    }
+    if blocks.is_empty() {
+        return "None yet.".to_string();
+    }
+    blocks.reverse();
+    blocks.join("\n\n")
 }
 
 fn pcm_duration_ms(pcm: &[u8]) -> u64 {
@@ -1285,14 +1338,79 @@ mod tests {
     #[test]
     fn conversation_history_is_empty_by_default_and_formatted_when_present() {
         assert_eq!(format_conversation(&[]), "None yet.");
-        let history = vec![(
-            "Tell me about a project.".to_string(),
-            "I built...".to_string(),
-        )];
+        let turn = |said: &str, answer: Option<&str>, asked| Turn {
+            generation: None,
+            said: said.into(),
+            answer: answer.map(Into::into),
+            asked,
+        };
+        let history = vec![
+            turn("We're a fintech team.", None, false),
+            turn("Tell me about a project.", Some("I built..."), true),
+            turn("Which part was hardest", None, true),
+        ];
         assert_eq!(
             format_conversation(&history),
-            "[Previously asked] Tell me about a project.\n[Previous answer] I built..."
+            "[Interviewer remarked] We're a fintech team.\n\n\
+             [Previously asked] Tell me about a project.\n[Previous answer] I built...\n\n\
+             [Asked, not answered — they kept talking] Which part was hardest"
         );
+    }
+
+    #[test]
+    fn a_long_conversation_keeps_the_newest_turns_within_budget() {
+        let history: Vec<Turn> = (0..12)
+            .map(|i| Turn {
+                generation: Some(i),
+                said: format!("question {i}"),
+                answer: Some("x".repeat(900)),
+                asked: true,
+            })
+            .collect();
+        let text = format_conversation(&history);
+        assert!(text.len() <= HISTORY_MAX_CHARS + 100, "{}", text.len());
+        assert!(text.contains("question 11"), "newest turn dropped");
+        assert!(
+            !text.contains("question 0\n"),
+            "oldest turn kept over budget"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_interrupted_question_and_earlier_remarks_stay_in_the_conversation() {
+        let (mut a, _events) = assembler();
+        a.on_transcript(heard("Our stack is Rust and Kafka.", 0, 2_000));
+        // Long after: the remark doesn't prefix the question, but is kept.
+        a.on_transcript(heard("Tell me about a project you led.", 10_000, 12_000));
+        // A new question 4 s later abandons the first answer mid-stream.
+        a.on_transcript(heard("What did you learn from it?", 16_000, 17_500));
+        let said: Vec<(&str, bool)> = a
+            .history
+            .iter()
+            .map(|t| (t.said.as_str(), t.answer.is_none()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                ("Our stack is Rust and Kafka.", true),
+                ("Tell me about a project you led.", true)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_question_resumed_after_a_thinking_pause_is_answered_whole() {
+        let (mut a, events) = assembler();
+        a.on_transcript(heard("Tell me about a project you led.", 0, 2_000));
+        // 2.6 s pause to think, then the second half.
+        a.on_transcript(heard("And what would you do differently?", 4_600, 6_500));
+        let finalized = of_kind(&events, "question.finalized");
+        assert_eq!(finalized.len(), 2);
+        assert_eq!(
+            finalized[1]["content"],
+            "Tell me about a project you led. And what would you do differently?"
+        );
+        assert_eq!(finalized[1]["replaces"], finalized[0]["generation"]);
     }
 
     #[test]

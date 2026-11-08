@@ -19,8 +19,9 @@
 //!   replace an answer the candidate is already reading.
 
 /// Speech that resumes within this long after the question's last word is
-/// treated as the rest of the same question.
-pub const MERGE_GAP_MS: u64 = 2_000;
+/// treated as the rest of the same question. Interviewers routinely stop for
+/// 2-3 s mid-question to think; 2 s split those into two questions.
+pub const MERGE_GAP_MS: u64 = 3_000;
 /// How long a question that ends mid-sentence waits for its continuation
 /// before being answered as-is.
 pub const FRAGMENT_HOLD_MS: u64 = 1_200;
